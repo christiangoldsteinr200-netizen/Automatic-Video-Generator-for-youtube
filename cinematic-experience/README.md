@@ -45,7 +45,8 @@ Las rutas son relativas (`visual_assets_neutral/…`). La carpeta se configura e
 
 Las etiquetas de las latas van incrustadas en el HTML como data-URI (`window.CINE_LABELS`).
 Así también se ven al abrir la página con doble clic. Cada textura de 2048×1024 cubre la lata
-completa: la cara frontal de la foto delante y detrás, con un fundido en los laterales.
+completa: la cara frontal de la foto delante y detrás. Como la foto solo muestra el frente, los
+laterales son aluminio liso y por ellos continúa la banda superior de color.
 
 Dependencias por CDN, con versiones fijas:
 
@@ -106,7 +107,10 @@ una disolución por ruido y distorsión.
   la resolución máxima baja. El encuadre se compensa en vertical, salvo en los primeros planos.
 - La resolución es adaptativa: el DPR baja si los FPS caen por debajo de 45 y sube si se
   mantienen estables.
-- Los shaders se precompilan durante la carga para evitar tirones a mitad del scroll.
+- Los shaders se precompilan y todas las texturas se suben a la GPU durante la carga, para
+  evitar tirones a mitad del scroll.
+- Los elementos flotantes se encogen al cruzar la línea de visión entre la cámara y las latas,
+  de modo que el producto nunca queda tapado.
 - Con `prefers-reduced-motion` se suavizan el destello, la distorsión, la cámara en mano y el
   parallax.
 
