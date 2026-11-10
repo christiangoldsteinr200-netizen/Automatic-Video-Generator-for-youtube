@@ -2,7 +2,9 @@
 
 Una película interactiva en 13 escenas. El scroll la controla de principio a fin.
 Todo está en un solo archivo, `index.html`, con Three.js, GSAP ScrollTrigger y WebGL.
-Los dos objetos son cilindros abstractos de visualización, sin etiquetas, marcas ni claims.
+Las dos latas 3D llevan las etiquetas Smirnoff Ice Red Berries y Green Apple, sacadas de las
+fotos de referencia y desenrolladas a 360°. Al pie de la pantalla aparece la leyenda legal
+sobre el consumo de alcohol.
 
 ## Cómo verla
 
@@ -23,7 +25,10 @@ dibujan encima en WebGL. No aparecen errores en la consola.
 
 ```
 cinematic-experience/
-├── index.html                  # experiencia completa (HTML + CSS + JS)
+├── index.html                  # experiencia completa (HTML + CSS + JS + etiquetas incrustadas)
+├── can_labels/                 # etiquetas desenrolladas (fuente de las que van incrustadas en el HTML)
+│   ├── red_berries.jpg
+│   └── green_apple.jpg
 └── visual_assets_neutral/      # los 8 PNG del ZIP, con sus nombres exactos
     ├── 01_hero_black_red.png
     ├── 02_metallic_macro_texture.png
@@ -36,7 +41,11 @@ cinematic-experience/
 ```
 
 Las rutas son relativas (`visual_assets_neutral/…`). La carpeta se configura en
-`CINE.ASSET_PATH`, dentro del primer `<script>`.
+`CINE.ASSET_PATH`, dentro del script del director.
+
+Las etiquetas de las latas van incrustadas en el HTML como data-URI (`window.CINE_LABELS`).
+Así también se ven al abrir la página con doble clic. Cada textura de 2048×1024 cubre la lata
+completa: la cara frontal de la foto delante y detrás, con un fundido en los laterales.
 
 Dependencias por CDN, con versiones fijas:
 
