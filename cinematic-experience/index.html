@@ -127,6 +127,8 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .cap--center { align-items: center; text-align: center; justify-content: center; padding-bottom: 0; }
 .cap--top { align-items: center; text-align: center; justify-content: flex-start; padding-top: calc(var(--lb) * 4.2vh + 11vh); padding-bottom: 0; }
 .cap--top .cap__title { font-size: clamp(2.4rem, 5.6vw, 5.6rem); }
+.cap--top .cap__meta { order: -2; }
+.cap--top .cap__sub { order: -1; margin: 0 0 14px; }
 .cap__inner { display: flex; flex-direction: column; align-items: inherit; max-width: min(92vw, 980px); }
 .cap__meta {
   display: flex; align-items: center; gap: 14px;
@@ -148,6 +150,7 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .cap--intro .cap__title { font-size: clamp(3.6rem, 13vw, 13.5rem); line-height: .84; }
 .cap--flash { color: #0b0b0d; text-shadow: none; }
 .cap--flash .cap__meta { color: rgba(10,10,12,.62); }
+.cap--flash .cap__sub { color: rgba(10,10,12,.7); }
 .cap--low { align-items: center; text-align: center; padding-bottom: calc(var(--lb) * 4.2vh + 9vh); }
 .cap--end .cap__title { font-size: clamp(2.6rem, 6.4vw, 6.6rem); }
 .cap--end .cap__sub { margin-top: 10px; }
@@ -297,6 +300,7 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
       <div class="cap__inner">
         <p class="cap__meta"><b>06</b><i></i><span>White Flash</span></p>
         <h2 class="cap__title"><span class="ln"><span>Ya llegaron</span></span><span class="ln"><span>todos.</span></span></h2>
+        <p class="cap__sub">Se prendió la juntada.</p>
       </div>
     </article>
     <article class="cap" data-i="6">
@@ -317,6 +321,7 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
       <div class="cap__inner">
         <p class="cap__meta"><b>09</b><i></i><span>Camera Journey</span></p>
         <h2 class="cap__title"><span class="ln"><span>La juntada</span></span><span class="ln"><span>no para.</span></span></h2>
+        <p class="cap__sub">Una ronda más, otra canción, otro brindis.</p>
       </div>
     </article>
     <article class="cap" data-i="9">
@@ -330,6 +335,7 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
       <div class="cap__inner">
         <p class="cap__meta"><b>11</b><i></i><span>Dual Composition</span></p>
         <h2 class="cap__title"><span class="ln"><span>Una y una.</span></span></h2>
+        <p class="cap__sub">Red Berries para ti, Green Apple para mí.</p>
       </div>
     </article>
     <article class="cap cap--right" data-i="11">
@@ -502,11 +508,11 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
   const devDpr = window.devicePixelRatio || 1;
   const bigScreen = window.innerWidth * window.innerHeight > 2.4e6;
   C.Q = C.mobile ? {
-    mobile: true, dprStart: 1.25, dprMax: 1.5, dprMin: 0.7, particles: lowCores ? 1600 : 2600, streaks: 220,
+    mobile: true, dprStart: 1.75, dprMax: 2, dprMin: 1.25, particles: lowCores ? 1600 : 2600, streaks: 220,
     drops: 70, pink: [18, 12], ice: 44, green: [18, 6], shapes: 12, rings: 14, shards: 26, surfDrops: 30,
     fog: 6, reflector: false, msaa: 0, texW: 1024, dropTex: 512, envLRU: 4,
   } : {
-    mobile: false, dprStart: bigScreen ? 1.1 : 1.5, dprMax: 2, dprMin: 0.9, particles: 7500, streaks: 650,
+    mobile: false, dprStart: bigScreen ? 1.5 : 2, dprMax: 2, dprMin: bigScreen ? 1 : 1.25, particles: 7500, streaks: 650,
     drops: 170, pink: [42, 26], ice: 100, green: [38, 12], shapes: 26, rings: 22, shards: 60, surfDrops: 80,
     // MSAA solo en pantallas de densidad estándar (en hi-DPI la propia resolución suaviza bordes)
     fog: 10, reflector: true, msaa: devDpr < 1.5 && !bigScreen ? 4 : 0, texW: 2048, dropTex: 1024, envLRU: 99,
@@ -2305,7 +2311,7 @@ async function boot() {
       D.fps = Math.round(fps);
       perfFrames = 0; perfT = now;
       if (!document.hidden && C.loaded) {
-        if (fps < 45 && dpr > Q.dprMin + 0.01) { dpr = Math.max(Q.dprMin, dpr - 0.2); resize(); goodStreak = 0; }
+        if (fps < 30 && dpr > Q.dprMin + 0.01) { dpr = Math.max(Q.dprMin, dpr - 0.15); resize(); goodStreak = 0; }
         else if (fps > 58) { if (++goodStreak >= 4 && dpr < Math.min(Q.dprMax, window.devicePixelRatio || 1) - 0.01) { dpr = Math.min(Q.dprMax, dpr + 0.15); resize(); goodStreak = 0; } }
         else goodStreak = 0;
         D.dpr = dpr;
