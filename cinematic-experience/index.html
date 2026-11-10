@@ -1,0 +1,2284 @@
+<!doctype html>
+<html lang="es" class="mode-pending">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Dos Mundos — Experiencia cinematográfica 3D</title>
+<meta name="description" content="Película interactiva en 13 escenas controlada por scroll. Three.js, GSAP ScrollTrigger y WebGL.">
+<meta name="theme-color" content="#030304">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@300;400;500&family=JetBrains+Mono:wght@400;500&display=swap">
+
+<!-- Three.js (ES modules) vía CDN -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<style>
+/* ==========================================================================
+   1. TOKENS
+   ========================================================================== */
+:root {
+  --bg: #030304;
+  --ink: #f4f1ec;
+  --muted: rgba(244, 241, 236, .56);
+  --faint: rgba(244, 241, 236, .18);
+  --red: #ff2a3d;
+  --lb: 1;
+  --font-d: 'Anton', 'Impact', 'Haettenschweiler', 'Arial Narrow Bold', sans-serif;
+  --font-b: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-m: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  --gutter: clamp(16px, 4.2vw, 64px);
+  color-scheme: dark;
+}
+
+/* ==========================================================================
+   2. BASE
+   ========================================================================== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { background: var(--bg); color: var(--ink); }
+body {
+  font-family: var(--font-b);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+  text-rendering: optimizeLegibility;
+}
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+.mono { font-family: var(--font-m); font-size: 11px; letter-spacing: .18em; text-transform: uppercase; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ==========================================================================
+   3. FILM (sección pinned por ScrollTrigger)
+   ========================================================================== */
+#film {
+  position: relative;
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+  background: #000;
+  isolation: isolate;
+}
+#gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; z-index: 1; }
+
+/* Fondo CSS: se usa como fallback (sin WebGL) o en modo híbrido (file://) */
+#bgcss { position: absolute; inset: 0; z-index: 0; display: none; overflow: hidden; background: #000; }
+.bgl {
+  position: absolute; inset: -14%;
+  background-size: cover; background-position: center;
+  opacity: 0; will-change: transform, opacity;
+}
+.mode-css #bgcss, .mode-hybrid #bgcss { display: block; }
+.mode-css #gl { display: none; }
+
+/* Cilindros CSS (solo fallback sin WebGL) */
+#ccans { position: absolute; inset: 0; z-index: 2; pointer-events: none; display: none; }
+.mode-css #ccans { display: block; }
+.ccan {
+  position: absolute; left: 0; top: 0; width: 100px; height: 185px;
+  border-radius: calc(16% + var(--mo, 0) * 34%) / calc(7% + var(--mo, 0) * 43%);
+  background: linear-gradient(90deg, #17191d 0%, #6a7079 13%, #eef0f3 29%, #a4aab3 45%, #3a3e45 63%, #c9ced5 81%, #1f2125 100%);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.08), 0 40px 80px -24px rgba(0,0,0,.85);
+  overflow: hidden; will-change: transform; transform-origin: 50% 50%;
+}
+.ccan i {
+  position: absolute; left: 0; right: 0; top: 22%; bottom: 15%;
+  background: linear-gradient(180deg, var(--c3), var(--c2) 38%, var(--c1));
+  mix-blend-mode: multiply;
+  clip-path: inset(calc((1 - var(--rv, 0)) * 100%) 0 0 0);
+}
+.ccan--a { --c1: #8d0030; --c2: #ff2f73; --c3: #ff9fbf; }
+.ccan--b { --c1: #0b5a24; --c2: #36b04e; --c3: #a9e57e; }
+
+/* Overlays de cámara */
+.fx-css { position: absolute; inset: 0; pointer-events: none; display: none; z-index: 3; }
+.mode-css .fx-css, .mode-hybrid .fx-css { display: block; }
+.fx-vignette { background: radial-gradient(ellipse 75% 70% at 50% 50%, transparent 40%, rgba(0,0,0,.72) 100%); }
+#flash { position: absolute; inset: 0; z-index: 4; background: #fff; opacity: 0; pointer-events: none; display: none; }
+.mode-css #flash { display: block; }
+#fxblack { position: absolute; inset: 0; z-index: 5; background: #000; pointer-events: none; }
+#scrim { position: absolute; inset: 0; z-index: 5; pointer-events: none; background: linear-gradient(0deg, rgba(0,0,0,.5) 0%, rgba(0,0,0,.18) 32%, transparent 55%); }
+@media (max-width: 760px) { #scrim { background: linear-gradient(0deg, rgba(0,0,0,.62) 0%, rgba(0,0,0,.3) 40%, transparent 65%); } }
+
+/* Letterbox cinematográfico */
+.lb { position: absolute; left: 0; right: 0; height: calc(var(--lb) * 4.2vh); background: #000; z-index: 6; pointer-events: none; }
+.lb--top { top: 0; } .lb--bot { bottom: 0; }
+
+/* ==========================================================================
+   4. CAPTIONS (una por escena)
+   ========================================================================== */
+#caps { position: absolute; inset: 0; z-index: 7; pointer-events: none; }
+.cap {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; justify-content: flex-end; align-items: flex-start;
+  padding: 0 var(--gutter) calc(var(--lb) * 4.2vh + 15vh);
+  visibility: hidden;
+  text-shadow: 0 2px 28px rgba(0,0,0,.35);
+}
+.cap--right { align-items: flex-end; text-align: right; }
+.cap--center { align-items: center; text-align: center; justify-content: center; padding-bottom: 0; }
+.cap--top { align-items: center; text-align: center; justify-content: flex-start; padding-top: calc(var(--lb) * 4.2vh + 11vh); padding-bottom: 0; }
+.cap--top .cap__title { font-size: clamp(2.4rem, 5.6vw, 5.6rem); }
+.cap__inner { display: flex; flex-direction: column; align-items: inherit; max-width: min(92vw, 980px); }
+.cap__meta {
+  display: flex; align-items: center; gap: 14px;
+  font-family: var(--font-m); font-size: 11px; letter-spacing: .24em; text-transform: uppercase;
+  color: var(--muted); margin-bottom: 18px;
+}
+.cap__meta b { color: var(--red); font-weight: 500; }
+.cap__meta i { display: block; width: 46px; height: 1px; background: currentColor; opacity: .6; }
+.cap__title {
+  font-family: var(--font-d); font-weight: 400; text-transform: uppercase;
+  font-size: clamp(2.6rem, 7.2vw, 7.4rem); line-height: .9; letter-spacing: .005em;
+}
+.ln { display: block; overflow: hidden; padding: .02em .04em .06em; margin: 0 -.04em; }
+.ln > span { display: inline-block; will-change: transform; }
+.cap__sub {
+  margin-top: 20px; max-width: 34ch;
+  font-size: clamp(13px, 1.05vw, 15px); line-height: 1.55; font-weight: 300; color: var(--muted);
+}
+.cap--intro .cap__title { font-size: clamp(3.6rem, 13vw, 13.5rem); line-height: .84; }
+.cap--flash { color: #0b0b0d; text-shadow: none; }
+.cap--flash .cap__meta { color: rgba(10,10,12,.62); }
+.cap--low { align-items: center; text-align: center; padding-bottom: calc(var(--lb) * 4.2vh + 9vh); }
+.cap--end .cap__title { font-size: clamp(2.6rem, 6.4vw, 6.6rem); }
+.cap--end .cap__sub { margin-top: 10px; }
+.cap--end .replay { margin-top: 18px; }
+.replay {
+  pointer-events: auto; margin-top: 30px;
+  display: inline-flex; align-items: center; gap: 12px;
+  padding: 13px 22px; border: 1px solid var(--faint); border-radius: 999px;
+  font-family: var(--font-m); font-size: 11px; letter-spacing: .22em; text-transform: uppercase;
+  transition: background .3s, border-color .3s, color .3s;
+}
+.replay:hover, .replay:focus-visible { background: var(--ink); color: #000; border-color: var(--ink); outline: none; }
+
+/* ==========================================================================
+   5. HUD
+   ========================================================================== */
+.hud { position: absolute; left: 0; right: 0; z-index: 8; padding: 0 var(--gutter); pointer-events: none; }
+.hud--top { top: calc(var(--lb) * 4.2vh + 18px); display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.hud--bot { bottom: calc(var(--lb) * 4.2vh + 18px); }
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); box-shadow: 0 0 14px var(--red); animation: pulse 2.4s ease-in-out infinite; }
+.brand__name { font-family: var(--font-d); font-size: 17px; letter-spacing: .08em; }
+.brand__sub { color: var(--muted); }
+.hud__scene { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; text-align: right; }
+.hud__scene #hud-name { font-family: var(--font-d); font-size: 15px; letter-spacing: .1em; text-transform: uppercase; }
+.hud__scene .mono { color: var(--muted); }
+.hint { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; color: var(--muted); }
+.hint__line { position: relative; width: 1px; height: 38px; background: var(--faint); overflow: hidden; }
+.hint__line::after { content: ''; position: absolute; left: 0; top: -40%; width: 1px; height: 40%; background: var(--ink); animation: drip 1.8s cubic-bezier(.6,0,.2,1) infinite; }
+.track { display: flex; gap: 4px; pointer-events: auto; }
+.seg { position: relative; height: 22px; flex: 1 1 0; display: flex; align-items: center; }
+.seg::before { content: ''; position: absolute; left: 0; right: 0; top: 50%; height: 2px; margin-top: -1px; background: var(--faint); }
+.seg i { position: absolute; left: 0; right: 0; top: 50%; height: 2px; margin-top: -1px; background: var(--ink); transform-origin: 0 50%; transform: scaleX(0); }
+.seg.is-active i { background: var(--red); box-shadow: 0 0 10px rgba(255,42,61,.6); }
+.seg span { position: absolute; left: 0; bottom: 100%; font-family: var(--font-m); font-size: 9px; letter-spacing: .14em; color: var(--muted); opacity: 0; transform: translateY(4px); transition: opacity .25s, transform .25s; white-space: nowrap; }
+.seg:hover span, .seg:focus-visible span, .seg.is-active span { opacity: 1; transform: none; }
+.seg:focus-visible { outline: 1px solid var(--ink); outline-offset: 2px; }
+@keyframes pulse { 50% { opacity: .35; } }
+@keyframes drip { to { top: 100%; } }
+
+/* ==========================================================================
+   6. LOADER
+   ========================================================================== */
+#loader {
+  position: fixed; inset: 0; z-index: 100; background: #000;
+  display: grid; place-items: center; clip-path: inset(0 0 0 0);
+}
+.ld { width: min(86vw, 760px); display: flex; flex-direction: column; gap: 22px; }
+.ld__eyebrow { color: var(--muted); }
+.ld__mark { position: relative; font-family: var(--font-d); font-size: clamp(3rem, 12vw, 8.6rem); line-height: .9; letter-spacing: .01em; white-space: nowrap; }
+.ld__mark-outline { color: transparent; -webkit-text-stroke: 1px rgba(255,255,255,.22); }
+.ld__mark-fill { position: absolute; inset: 0; color: var(--ink); clip-path: inset(0 100% 0 0); }
+.ld__bar { position: relative; height: 1px; background: var(--faint); overflow: hidden; }
+.ld__bar i { position: absolute; inset: 0; background: var(--red); transform-origin: 0 50%; transform: scaleX(0); box-shadow: 0 0 12px var(--red); }
+.ld__meta { display: flex; justify-content: space-between; color: var(--muted); }
+
+/* ==========================================================================
+   7. FALLBACK ESTÁTICO (sin GSAP)
+   ========================================================================== */
+#static { display: none; }
+.mode-static #film { display: none; }
+.mode-static #static { display: block; }
+.st-sec { position: relative; min-height: 100vh; display: flex; align-items: flex-end; padding: 0 var(--gutter) 14vh; background-size: cover; background-position: center; }
+.st-sec h2 { font-family: var(--font-d); font-size: clamp(2.6rem, 8vw, 7rem); line-height: .9; text-transform: uppercase; font-weight: 400; }
+.st-sec p { margin-top: 14px; color: var(--muted); max-width: 40ch; }
+
+/* ==========================================================================
+   8. RESPONSIVE
+   ========================================================================== */
+@media (max-width: 760px) {
+  .brand__sub { display: none; }
+  .cap { padding-bottom: calc(var(--lb) * 4.2vh + 13vh); }
+  .cap--right { align-items: flex-start; text-align: left; }
+  .cap__sub { max-width: 30ch; }
+  .seg span { display: none; }
+  .hint { margin-bottom: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .brand__dot, .hint__line::after { animation: none; }
+}
+</style>
+</head>
+<body>
+
+<!-- ============================ LOADER ============================ -->
+<div id="loader" role="status" aria-live="polite">
+  <div class="ld">
+    <p class="ld__eyebrow mono">Experiencia cinematográfica 3D · 13 escenas</p>
+    <div class="ld__mark" aria-hidden="true">
+      <span class="ld__mark-outline">DOS MUNDOS</span>
+      <span class="ld__mark-fill" id="ld-fill">DOS MUNDOS</span>
+    </div>
+    <div class="ld__bar"><i id="ld-bar"></i></div>
+    <div class="ld__meta mono"><span id="ld-step">Cargando fondos 0/8</span><span id="ld-pct">0%</span></div>
+  </div>
+</div>
+
+<!-- ============================ FILM ============================ -->
+<main id="film" aria-label="Película interactiva controlada por scroll">
+  <div id="bgcss" aria-hidden="true"></div>
+  <canvas id="gl" aria-hidden="true"></canvas>
+  <div id="ccans" aria-hidden="true"><div class="ccan ccan--a"><i></i></div><div class="ccan ccan--b"><i></i></div></div>
+  <div class="fx-css fx-vignette" aria-hidden="true"></div>
+  <div id="flash" aria-hidden="true"></div>
+  <div id="scrim" aria-hidden="true"></div>
+  <div id="fxblack" aria-hidden="true"></div>
+  <div class="lb lb--top" aria-hidden="true"></div>
+  <div class="lb lb--bot" aria-hidden="true"></div>
+
+  <div id="caps">
+    <article class="cap cap--intro" data-i="0" id="cap0">
+      <div class="cap__inner">
+        <p class="cap__meta"><b>01</b><i></i><span>Dark Entrance</span></p>
+        <h1 class="cap__title"><span class="ln"><span>Dos</span></span><span class="ln"><span>mundos.</span></span></h1>
+        <p class="cap__sub">Una película interactiva en trece escenas. Desliza para entrar.</p>
+      </div>
+    </article>
+    <article class="cap" data-i="1">
+      <div class="cap__inner">
+        <p class="cap__meta"><b>02</b><i></i><span>Macro Detail</span></p>
+        <h2 class="cap__title"><span class="ln"><span>Cada gota</span></span><span class="ln"><span>guarda la luz.</span></span></h2>
+        <p class="cap__sub">Acercamiento extremo. Condensación, reflejos y profundidad de campo.</p>
+      </div>
+    </article>
+    <article class="cap cap--right" data-i="2">
+      <div class="cap__inner">
+        <p class="cap__meta"><b>03</b><i></i><span>Product Reveal</span></p>
+        <h2 class="cap__title"><span class="ln"><span>Dos formas.</span></span><span class="ln"><span>Dos materias.</span></span></h2>
+        <p class="cap__sub">La cámara retrocede y orbita. Dos materiales bajo una misma luz.</p>
+      </div>
+    </article>
+    <article class="cap" data-i="3">
+      <div class="cap__inner">
+        <p class="cap__meta"><b>04</b><i></i><span>Pink Universe</span></p>
+        <h2 class="cap__title"><span class="ln"><span>Un universo</span></span><span class="ln"><span>en suspensión.</span></span></h2>
+        <p class="cap__sub">Esferas y cristales flotan en una atmósfera rosada.</p>
+      </div>
+    </article>
+    <article class="cap cap--right" data-i="4">
+      <div class="cap__inner">
+        <p class="cap__meta"><b>05</b><i></i><span>Ice World</span></p>
+        <h2 class="cap__title"><span class="ln"><span>El frío tiene</span></span><span class="ln"><span>arquitectura.</span></span></h2>
+        <p class="cap__sub">Cristales suspendidos. La cámara atraviesa el escenario.</p>
+      </div>
+    </article>
+    <article class="cap cap--center cap--flash" data-i="5">
+      <div class="cap__inner">
+        <p class="cap__meta"><b>06</b><i></i><span>White Flash</span></p>
+        <h2 class="cap__title"><span class="ln"><span>Exposición</span></span><span class="ln"><span>total.</span></span></h2>
+      </div>
+    </article>
+    <article class="cap" data-i="6">
+      <div class="cap__inner">
+        <p class="cap__meta"><b>07</b><i></i><span>Green Universe</span></p>
+        <h2 class="cap__title"><span class="ln"><span>Todo</span></span><span class="ln"><span>asciende.</span></span></h2>
+        <p class="cap__sub">Elementos verdes en ascenso. Cámara orbital.</p>
+      </div>
+    </article>
+    <article class="cap cap--right" data-i="7">
+      <div class="cap__inner">
+        <p class="cap__meta"><b>08</b><i></i><span>Metallic World</span></p>
+        <h2 class="cap__title"><span class="ln"><span>Metal, luz</span></span><span class="ln"><span>y silencio.</span></span></h2>
+        <p class="cap__sub">Superficie metálica, luz volumétrica, objetos suspendidos.</p>
+      </div>
+    </article>
+    <article class="cap cap--center" data-i="8">
+      <div class="cap__inner">
+        <p class="cap__meta"><b>09</b><i></i><span>Camera Journey</span></p>
+        <h2 class="cap__title"><span class="ln"><span>Profundidad</span></span><span class="ln"><span>infinita.</span></span></h2>
+      </div>
+    </article>
+    <article class="cap" data-i="9">
+      <div class="cap__inner">
+        <p class="cap__meta"><b>10</b><i></i><span>Abstract Transformation</span></p>
+        <h2 class="cap__title"><span class="ln"><span>La forma es</span></span><span class="ln"><span>solo un estado.</span></span></h2>
+        <p class="cap__sub">Posición, escala e iluminación en metamorfosis.</p>
+      </div>
+    </article>
+    <article class="cap cap--top" data-i="10">
+      <div class="cap__inner">
+        <p class="cap__meta"><b>11</b><i></i><span>Dual Composition</span></p>
+        <h2 class="cap__title"><span class="ln"><span>Equilibrio.</span></span></h2>
+      </div>
+    </article>
+    <article class="cap cap--right" data-i="11">
+      <div class="cap__inner">
+        <p class="cap__meta"><b>12</b><i></i><span>Final Approach</span></p>
+        <h2 class="cap__title"><span class="ln"><span>Todo vuelve</span></span><span class="ln"><span>al centro.</span></span></h2>
+        <p class="cap__sub">La cámara retrocede. Las partículas convergen.</p>
+      </div>
+    </article>
+    <article class="cap cap--low cap--end" data-i="12">
+      <div class="cap__inner">
+        <p class="cap__meta"><b>13</b><i></i><span>Final Frame</span></p>
+        <h2 class="cap__title"><span class="ln"><span>Dos mundos.</span></span></h2>
+        <p class="cap__sub">Fin.</p>
+        <button class="replay" id="replay" type="button">Volver al inicio <span aria-hidden="true">↺</span></button>
+      </div>
+    </article>
+  </div>
+
+  <header class="hud hud--top">
+    <div class="brand"><span class="brand__dot" aria-hidden="true"></span><span class="brand__name">DOS MUNDOS</span><span class="brand__sub mono">Película interactiva</span></div>
+    <div class="hud__scene" aria-live="polite">
+      <span class="mono" id="hud-n">Esc 01 / 13</span>
+      <span id="hud-name">Dark Entrance</span>
+      <span class="mono" id="hud-tc">00:00:00:00</span>
+    </div>
+  </header>
+  <footer class="hud hud--bot">
+    <div class="hint" id="hint"><span class="hint__line" aria-hidden="true"></span><span class="mono">Desliza para avanzar</span></div>
+    <nav class="track" id="track" aria-label="Escenas"></nav>
+  </footer>
+</main>
+
+<div id="static" aria-label="Versión estática"></div>
+
+<noscript>
+  <p style="position:fixed;inset:auto 0 0 0;padding:16px;background:#000;color:#fff;font:14px system-ui;z-index:200">
+    Esta experiencia necesita JavaScript para reproducir la película interactiva.
+  </p>
+</noscript>
+
+<!-- GSAP + ScrollTrigger vía CDN -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+
+<!-- =====================================================================
+     DIRECTOR — configuración, estado, línea de tiempo, HUD y fallbacks.
+     Script clásico: no depende de Three.js. El motor WebGL (módulo) solo
+     lee el estado `CINE.S` que esta línea de tiempo anima con el scroll.
+     ===================================================================== -->
+<script>
+(() => {
+  'use strict';
+
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  const root = document.documentElement;
+
+  const C = (window.CINE = {
+    mode: 'pending',
+    missing: [],
+    intro: { v: 0 },
+    view: { yaw: 0, pitch: 0, roll: 0, zoom: 1.12, trans: 0 },
+    engineStarted: false,
+    loaded: false,
+  });
+
+  try { history.scrollRestoration = 'manual'; } catch (e) { /* noop */ }
+  window.scrollTo(0, 0);
+
+  /* ------------------------------------------------------------------
+     1. RECURSOS — nombres exactos del ZIP, rutas relativas
+     ------------------------------------------------------------------ */
+  C.ASSET_PATH = 'visual_assets_neutral/';
+  C.FILES = [
+    '01_hero_black_red.png',
+    '02_metallic_macro_texture.png',
+    '03_pink_abstract_flavor_world.png',
+    '04_ice_crystal_world.png',
+    '05_white_flash_transition.png',
+    '06_green_abstract_flavor_world.png',
+    '07_silver_black_product_stage.png',
+    '08_final_black_red.png',
+  ];
+
+  // Paleta aproximada de cada fondo (placeholders si falta un archivo).
+  // [arriba, abajo, foco, focoX, focoY, radio]
+  C.PALETTE = [
+    ['#05050a', '#140409', '#6a0818', 0.74, 0.38, 0.32],
+    ['#1e2127', '#07080c', '#59606c', 0.50, 0.30, 0.34],
+    ['#2a0a18', '#bf1f4c', '#c94a6e', 0.50, 0.45, 0.36],
+    ['#0a131d', '#4b6b80', '#86a3b6', 0.50, 0.40, 0.32],
+    ['#f6f8fb', '#d3dbe4', '#ffffff', 0.50, 0.50, 0.40],
+    ['#03170e', '#1f6e3e', '#4f9a63', 0.68, 0.35, 0.30],
+    ['#0b0d11', '#2b3038', '#585d68', 0.50, 0.30, 0.34],
+    ['#000000', '#110105', '#4a0410', 0.50, 0.50, 0.36],
+  ];
+
+  /* ------------------------------------------------------------------
+     2. MUNDOS — recorrido de fondos (playlist) + "look" de iluminación
+     `S.world.pos` es un float: entre dos entradas se hace la transición.
+     ------------------------------------------------------------------ */
+  C.PLAYLIST = [0, 1, 2, 3, 4, 5, 6, 0, 2, 5, 6, 7];
+  const L_HERO   = { fog: '#0b0306', fogD: .034, pA: '#ff2a3d', pB: '#ffffff', pAlpha: .75, key: '#ffffff', keyI: 1.0, rimL: '#ff1a2e', rimR: '#ff3a4a', rimI: 5.5, fill: '#2a0006', fillI: .4, exp: 1.0, bloom: .8, gain: 1.25, haze: .55, hazeCol: '#ff2035', fogAmt: .05, env: 1.0, cone: '#ff6070' };
+  const L_METAL  = { fog: '#0e1015', fogD: .03, pA: '#cfd8e6', pB: '#ffffff', pAlpha: .6, key: '#ffffff', keyI: 2.6, rimL: '#ff2a3a', rimR: '#a8bcff', rimI: 3.2, fill: '#1c1f26', fillI: .6, exp: 1.05, bloom: .6, gain: 1.2, haze: .35, hazeCol: '#9aa6b8', fogAmt: .06, env: 1.15, cone: '#dfe6f2' };
+  const L_PINK   = { fog: '#3a0a1e', fogD: .038, pA: '#ff4f8b', pB: '#ffd6e4', pAlpha: .85, key: '#ffe9f1', keyI: 2.2, rimL: '#ff2f7a', rimR: '#ffa3c6', rimI: 4.5, fill: '#5c1030', fillI: .9, exp: 1.05, bloom: .85, gain: 1.12, haze: .5, hazeCol: '#ff4f8b', fogAmt: .08, env: 1.2, cone: '#ff8db3' };
+  const L_ICE    = { fog: '#16252f', fogD: .042, pA: '#bfe6ff', pB: '#ffffff', pAlpha: .9, key: '#eaf7ff', keyI: 2.4, rimL: '#7fc8ff', rimR: '#ffffff', rimI: 4.0, fill: '#1d3242', fillI: .8, exp: 1.05, bloom: .9, gain: 1.18, haze: .6, hazeCol: '#a8d8ff', fogAmt: .1, env: 1.3, cone: '#cfeaff' };
+  const L_WHITE  = { fog: '#e6ebf0', fogD: .02, pA: '#ffffff', pB: '#dfe8ff', pAlpha: .9, key: '#ffffff', keyI: 3.0, rimL: '#ffffff', rimR: '#ffffff', rimI: 4.0, fill: '#ffffff', fillI: 1.5, exp: 1.2, bloom: 1.1, gain: 1.12, haze: .4, hazeCol: '#ffffff', fogAmt: .1, env: 1.4, cone: '#ffffff' };
+  const L_GREEN  = { fog: '#062a17', fogD: .038, pA: '#5dff8f', pB: '#e6ffec', pAlpha: .85, key: '#f2fff4', keyI: 2.2, rimL: '#2fff70', rimR: '#c0ff9e', rimI: 4.5, fill: '#0b3a1e', fillI: .9, exp: 1.05, bloom: .8, gain: 1.12, haze: .5, hazeCol: '#4fff86', fogAmt: .08, env: 1.2, cone: '#9dffb8' };
+  const L_SILVER = { fog: '#0e1014', fogD: .03, pA: '#d4dae4', pB: '#ffffff', pAlpha: .65, key: '#ffffff', keyI: 2.8, rimL: '#ff2236', rimR: '#ff2236', rimI: 3.6, fill: '#1a1d24', fillI: .5, exp: 1.0, bloom: .6, gain: 1.2, haze: .35, hazeCol: '#c8d0dc', fogAmt: .06, env: 1.2, cone: '#e8eef8' };
+  const L_TUNNEL = { fog: '#080205', fogD: .055, pA: '#ff2035', pB: '#ffffff', pAlpha: .9, key: '#ff8a96', keyI: 1.3, rimL: '#ff1a2e', rimR: '#ff4455', rimI: 6.0, fill: '#22000a', fillI: .4, exp: 1.05, bloom: .95, gain: 1.2, haze: .6, hazeCol: '#ff2035', fogAmt: .07, env: 1.0, cone: '#ff5060' };
+  const L_FINAL  = { fog: '#050102', fogD: .03, pA: '#ff1a30', pB: '#ff9aa6', pAlpha: .95, key: '#ffffff', keyI: .6, rimL: '#ff1020', rimR: '#ff1020', rimI: 7.0, fill: '#140003', fillI: .25, exp: .98, bloom: .9, gain: 1.25, haze: .5, hazeCol: '#ff1020', fogAmt: .05, env: .85, cone: '#ff3040' };
+  C.LOOKS = [
+    L_HERO, L_METAL, L_PINK, L_ICE, L_WHITE, L_GREEN, L_SILVER, L_TUNNEL,
+    Object.assign({}, L_PINK, { fogD: .028 }),
+    Object.assign({}, L_GREEN, { fogD: .028 }),
+    Object.assign({}, L_SILVER, { rimI: 5.2, keyI: 2.4, fill: '#140608', cone: '#ffe0e4' }),
+    L_FINAL,
+  ];
+
+  /* ------------------------------------------------------------------
+     3. ESCENAS — duración relativa en la línea de tiempo
+     ------------------------------------------------------------------ */
+  C.SCENES = [
+    { n: '01', name: 'Dark Entrance', dur: 1.5 },
+    { n: '02', name: 'Macro Detail', dur: 1.3 },
+    { n: '03', name: 'Product Reveal', dur: 1.4 },
+    { n: '04', name: 'Pink Universe', dur: 1.3 },
+    { n: '05', name: 'Ice World', dur: 1.4 },
+    { n: '06', name: 'White Flash', dur: 0.8 },
+    { n: '07', name: 'Green Universe', dur: 1.3 },
+    { n: '08', name: 'Metallic World', dur: 1.3 },
+    { n: '09', name: 'Camera Journey', dur: 1.4 },
+    { n: '10', name: 'Abstract Transformation', dur: 1.5 },
+    { n: '11', name: 'Dual Composition', dur: 1.2 },
+    { n: '12', name: 'Final Approach', dur: 1.2 },
+    { n: '13', name: 'Final Frame', dur: 1.1 },
+  ];
+  let acc = 0;
+  for (const s of C.SCENES) { s.start = acc; acc += s.dur; }
+  C.TOTAL = acc;
+
+  /* ------------------------------------------------------------------
+     4. ESTADO — todo lo que la línea de tiempo anima
+     ------------------------------------------------------------------ */
+  const S = (C.S = {
+    // Rig de cámara esférico: objetivo + radio/azimut/elevación + fov/roll
+    cam: { tx: 0, ty: 0, tz: 0, r: 11, theta: 0.42, phi: 0.06, fov: 28, roll: 0.04, shift: -3 },
+    world: { pos: 0 },
+    fx: { flash: 0, mblur: 0, dof: 0.1, aperture: 0.25, distort: 0, exposure: 1, letterbox: 1.5 },
+    // Objeto A (rosa) y B (verde): cilindros abstractos sin etiquetas
+    A: { x: 0, y: 0, z: 0, rx: 0, ry: -0.6, rz: 0.06, s: 1, reveal: 0, morph: 0, show: 1 },
+    B: { x: 2.8, y: 0, z: -1.5, rx: 0, ry: -2, rz: 0, s: 1, reveal: 0, morph: 0, show: 0 },
+    sets: { drops: 0, pink: 0, pinkOrbit: 0, ice: 0, green: 0, greenRise: 0, stage: 0, floor: 0, cones: 0, journey: 0 },
+    p: { converge: 0, rise: 0, flow: 0 },
+    light: { key: 0.15, sweep: 0, sweepI: 0 },
+  });
+
+  /* ------------------------------------------------------------------
+     5. CAPACIDADES Y CALIDAD
+     ------------------------------------------------------------------ */
+  C.reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const coarse = matchMedia('(pointer: coarse)').matches;
+  C.mobile = coarse || window.innerWidth < 820;
+  const lowCores = (navigator.hardwareConcurrency || 8) <= 4;
+  const devDpr = window.devicePixelRatio || 1;
+  const bigScreen = window.innerWidth * window.innerHeight > 2.4e6;
+  C.Q = C.mobile ? {
+    mobile: true, dprStart: 1.25, dprMax: 1.5, dprMin: 0.7, particles: lowCores ? 1600 : 2600, streaks: 220,
+    drops: 70, pink: [18, 12], ice: 44, green: [18, 6], shapes: 12, rings: 14, shards: 26, surfDrops: 30,
+    fog: 6, reflector: false, msaa: 0, texW: 1024, dropTex: 512, envLRU: 4,
+  } : {
+    mobile: false, dprStart: bigScreen ? 1.1 : 1.5, dprMax: 2, dprMin: 0.9, particles: 7500, streaks: 650,
+    drops: 170, pink: [42, 26], ice: 100, green: [38, 12], shapes: 26, rings: 22, shards: 60, surfDrops: 80,
+    // MSAA solo en pantallas de densidad estándar (en hi-DPI la propia resolución suaviza bordes)
+    fog: 10, reflector: true, msaa: devDpr < 1.5 && !bigScreen ? 4 : 0, texW: 2048, dropTex: 1024, envLRU: 99,
+  };
+
+  C.hasWebGL = (() => {
+    try {
+      const c = document.createElement('canvas');
+      const gl = c.getContext('webgl2') || c.getContext('webgl');
+      if (!gl) return false;
+      const ext = gl.getExtension('WEBGL_lose_context');
+      if (ext) ext.loseContext();
+      return true;
+    } catch (e) { return false; }
+  })();
+
+  // Fondo procedural de reserva (si falta un PNG o para mapas de entorno en file://)
+  C.placeholder = (i, w = 512, h = 288) => {
+    const p = C.PALETTE[i];
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const g = c.getContext('2d');
+    const lin = g.createLinearGradient(0, 0, 0, h); lin.addColorStop(0, p[0]); lin.addColorStop(1, p[1]);
+    g.fillStyle = lin; g.fillRect(0, 0, w, h);
+    const rad = g.createRadialGradient(p[3] * w, p[4] * h, 0, p[3] * w, p[4] * h, p[5] * w);
+    rad.addColorStop(0, p[2]); rad.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = rad; g.fillRect(0, 0, w, h);
+    return c;
+  };
+
+  /* ------------------------------------------------------------------
+     6. LOADER + PRECARGA
+     ------------------------------------------------------------------ */
+  const ld = { el: $('#loader'), bar: $('#ld-bar'), fill: $('#ld-fill'), pct: $('#ld-pct'), step: $('#ld-step') };
+  let ldTarget = 0, ldShown = 0, ldRaf = 0;
+  C.setProgress = (p, msg) => {
+    ldTarget = Math.max(ldTarget, clamp(p, 0, 1));
+    if (msg) ld.step.textContent = msg;
+    if (!ldRaf) ldRaf = requestAnimationFrame(ldTick);
+  };
+  function ldTick() {
+    ldShown += (ldTarget - ldShown) * 0.12;
+    if (Math.abs(ldTarget - ldShown) < 0.002) ldShown = ldTarget;
+    ld.bar.style.transform = `scaleX(${ldShown.toFixed(4)})`;
+    ld.fill.style.clipPath = `inset(0 ${(100 - ldShown * 100).toFixed(2)}% 0 0)`;
+    ld.pct.textContent = Math.round(ldShown * 100) + '%';
+    ldRaf = ldShown < ldTarget ? requestAnimationFrame(ldTick) : 0;
+  }
+
+  C.images = [];
+  let nLoaded = 0;
+  C.assetsReady = new Promise((resolve) => {
+    C.FILES.forEach((file, i) => {
+      const img = new Image();
+      img.decoding = 'async';
+      const done = (ok) => {
+        if (!ok) C.missing.push(file);
+        nLoaded++;
+        C.setProgress((nLoaded / C.FILES.length) * 0.55, `Cargando fondos ${nLoaded}/${C.FILES.length}`);
+        if (nLoaded === C.FILES.length) resolve();
+      };
+      img.onload = () => done(true);
+      img.onerror = () => done(false);
+      img.src = C.ASSET_PATH + file;
+      C.images[i] = img;
+    });
+  });
+
+  // En file:// algunos navegadores marcan las imágenes como "cross-origin"
+  // y WebGL no puede leerlas: se detecta sin generar errores.
+  C.assetsReady.then(() => {
+    const img = C.images.find((im) => im.naturalWidth > 0);
+    C.tainted = false;
+    if (!img) return;
+    try {
+      const c = document.createElement('canvas'); c.width = c.height = 2;
+      const g = c.getContext('2d'); g.drawImage(img, 0, 0, 2, 2); g.getImageData(0, 0, 1, 1);
+    } catch (e) { C.tainted = true; }
+  });
+
+  // Fondo CSS (fallback/híbrido) con los mismos 8 PNG
+  const bgcss = $('#bgcss');
+  C.bgLayers = C.FILES.map((f, i) => {
+    const d = document.createElement('div');
+    d.className = 'bgl';
+    d.style.backgroundImage = `url("${C.ASSET_PATH + f}")`;
+    d.style.backgroundColor = C.PALETTE[i][1];
+    bgcss.appendChild(d);
+    return d;
+  });
+
+  C.finishLoading = () => {
+    if (C.loaded) return;
+    C.loaded = true;
+    C.setProgress(1, 'Listo');
+    if (!window.gsap) { ld.el.style.display = 'none'; C.intro.v = 1; return; }
+    gsap.timeline({ delay: 0.45 })
+      .to(ld.el, { clipPath: 'inset(0% 0% 100% 0%)', duration: 1.1, ease: 'power4.inOut' })
+      .set(ld.el, { display: 'none' });
+    gsap.to(C.intro, { v: 1, duration: 2.6, ease: 'power2.inOut', delay: 0.7 });
+    gsap.from('#cap0 .cap__inner', { y: 50, autoAlpha: 0, duration: 1.6, ease: 'power3.out', delay: 1.1 });
+    gsap.from('.hud', { autoAlpha: 0, duration: 1.4, delay: 1.5, stagger: 0.15 });
+    if (window.ScrollTrigger) ScrollTrigger.refresh();
+  };
+
+  C.engineReady = (hybrid) => {
+    if (C.mode !== 'pending') return false;
+    C.mode = hybrid ? 'hybrid' : 'webgl';
+    root.classList.remove('mode-pending');
+    root.classList.add(hybrid ? 'mode-hybrid' : 'mode-webgl');
+    C.finishLoading();
+    return true;
+  };
+
+  C.enterFallback = (reason) => {
+    if (C.mode === 'css' || C.mode === 'static') return;
+    C.mode = 'css';
+    C.fallbackReason = reason;
+    root.classList.remove('mode-pending', 'mode-webgl', 'mode-hybrid');
+    root.classList.add('mode-css');
+    C.assetsReady.then(() => C.finishLoading());
+  };
+
+  // Red de seguridad: si el módulo WebGL nunca arranca, usar el fallback CSS.
+  C.assetsReady.then(() => {
+    setTimeout(() => { if (C.mode === 'pending' && !C.engineStarted) C.enterFallback('no-module'); }, 4000);
+    setTimeout(() => { if (C.mode === 'pending') C.enterFallback('timeout'); }, 45000);
+  });
+
+  /* ------------------------------------------------------------------
+     7. SIN GSAP → versión estática con los mismos fondos
+     ------------------------------------------------------------------ */
+  if (!window.gsap || !window.ScrollTrigger) {
+    C.mode = 'static';
+    root.classList.remove('mode-pending');
+    root.classList.add('mode-static');
+    const st = $('#static');
+    const sceneTex = [0, 1, 1, 2, 3, 4, 5, 6, 0, 2, 6, 7, 7];
+    $$('.cap').forEach((cap, i) => {
+      const sec = document.createElement('section');
+      sec.className = 'st-sec';
+      sec.style.backgroundImage = `linear-gradient(180deg, rgba(0,0,0,.1), rgba(0,0,0,.55)), url("${C.ASSET_PATH + C.FILES[sceneTex[i]]}")`;
+      const h = document.createElement('div');
+      h.innerHTML = `<p class="mono">${C.SCENES[i].n} — ${C.SCENES[i].name}</p><h2>${cap.querySelector('.cap__title').textContent}</h2>`;
+      sec.appendChild(h);
+      st.appendChild(sec);
+    });
+    C.assetsReady.then(() => { C.setProgress(1, 'Listo'); setTimeout(() => { ld.el.style.display = 'none'; }, 400); });
+    return;
+  }
+
+  gsap.registerPlugin(ScrollTrigger);
+  ScrollTrigger.config({ ignoreMobileResize: true });
+
+  /* ------------------------------------------------------------------
+     8. LÍNEA DE TIEMPO PRINCIPAL (scrub con ScrollTrigger + pin)
+     ------------------------------------------------------------------ */
+  const SC = C.SCENES;
+  const tl = (C.tl = gsap.timeline({ paused: true, defaults: { ease: 'sine.inOut' } }));
+  const at = (i, a) => SC[i].start + a * SC[i].dur;
+  const tw = (target, vars, i, a, b, ease) =>
+    tl.to(target, Object.assign({ duration: Math.max(0.0001, (b - a) * SC[i].dur), ease: ease || 'sine.inOut' }, vars), at(i, a));
+  const set = (target, vars, i, a) => tl.set(target, vars, at(i, a));
+  const TAU = Math.PI * 2;
+  const { cam, A, B, fx, sets, p, light, world } = S;
+
+  // ── 01 DARK ENTRANCE — cámara lejana, dolly-in cinematográfico ─────────
+  tw(cam, { r: 3.4 }, 0, 0.0, 1.0, 'power2.inOut');
+  tw(cam, { theta: 0.12, phi: 0.1, fov: 32, roll: 0 }, 0, 0.0, 1.0);
+  tw(A, { ry: 0.3 }, 0, 0, 1, 'none');
+  tw(light, { key: 1 }, 0, 0.0, 0.55, 'sine.out');
+  tw(fx, { aperture: 0.45 }, 0, 0, 1);
+  tw(fx, { letterbox: 1 }, 0, 0, 0.6);
+  tw('#hint', { autoAlpha: 0 }, 0, 0.0, 0.12);
+
+  // ── 02 MACRO DETAIL — acercamiento extremo a la superficie ─────────────
+  tw(world, { pos: 1 }, 1, 0.0, 0.5);
+  tw(cam, { ty: 0.1, tz: 0.33 }, 1, 0.0, 0.55, 'power2.inOut');
+  tw(cam, { r: 0.42 }, 1, 0.0, 0.55, 'power3.inOut');
+  tw(cam, { r: 0.36 }, 1, 0.55, 1.0, 'none');
+  tw(cam, { fov: 22 }, 1, 0.0, 0.6, 'power2.inOut');
+  tw(cam, { theta: -0.3 }, 1, 0.15, 1.0);
+  tw(cam, { phi: -0.04 }, 1, 0.0, 1.0);
+  tw(cam, { roll: -0.1 }, 1, 0.3, 1.0);
+  tw(fx, { aperture: 2.6 }, 1, 0.1, 0.5);
+  tw(fx, { dof: 0.9 }, 1, 0.2, 0.55);
+  tw(sets, { drops: 1 }, 1, 0.2, 0.5);
+  tw(light, { sweep: 1 }, 1, 0.25, 1.0, 'none');
+  tw(light, { sweepI: 1 }, 1, 0.2, 0.4);
+  tw(A, { ry: 1.1 }, 1, 0, 1, 'none');
+
+  // ── 03 PRODUCT REVEAL — dolly-out + órbita, aparece el segundo objeto ─
+  tw(cam, { ty: 0, tz: 0 }, 2, 0.0, 0.5, 'power2.inOut');
+  tw(cam, { r: 4.6 }, 2, 0.0, 0.62, 'power3.inOut');
+  tw(cam, { fov: 30 }, 2, 0.0, 0.5);
+  tw(cam, { theta: 0.7 }, 2, 0.08, 1.0);
+  tw(cam, { phi: 0.1 }, 2, 0, 0.8);
+  tw(cam, { roll: 0 }, 2, 0, 0.4);
+  tw(fx, { aperture: 0.55 }, 2, 0, 0.4);
+  tw(fx, { dof: 0.12 }, 2, 0, 0.4);
+  tw(sets, { drops: 0 }, 2, 0, 0.3);
+  tw(light, { sweepI: 0 }, 2, 0.1, 0.5);
+  tw(A, { x: -0.48, rz: 0.12 }, 2, 0.3, 0.85, 'power2.inOut');
+  tw(A, { reveal: 1 }, 2, 0.3, 0.75, 'none');
+  tw(A, { ry: 1.6 }, 2, 0, 1, 'none');
+  tw(B, { show: 1 }, 2, 0.15, 0.3, 'none');
+  tw(B, { x: 0.48, z: 0, rz: -0.12, ry: 0.3 }, 2, 0.18, 0.8, 'power3.out');
+  tw(B, { reveal: 1 }, 2, 0.5, 0.95, 'none');
+
+  // ── 04 PINK UNIVERSE — partículas, esferas y cristales ────────────────
+  tw(world, { pos: 2 }, 3, 0.0, 0.42);
+  tw(sets, { pink: 1 }, 3, 0.05, 0.55, 'power2.out');
+  tw(sets, { pinkOrbit: 2.4 }, 3, 0, 1, 'none');
+  tw(cam, { theta: -0.9 }, 3, 0, 1);
+  tw(cam, { r: 3.1 }, 3, 0, 0.7);
+  tw(cam, { phi: 0.28 }, 3, 0, 0.5);
+  tw(cam, { phi: 0.06 }, 3, 0.5, 1);
+  tw(cam, { roll: 0.12 }, 3, 0, 0.5);
+  tw(cam, { roll: 0 }, 3, 0.5, 1);
+  tw(cam, { fov: 34 }, 3, 0, 1);
+  tw(fx, { aperture: 1.0 }, 3, 0, 0.5);
+  tw(A, { x: 0, y: 0.08, rz: 0.35, rx: 0.25 }, 3, 0, 0.8);
+  tw(A, { ry: 2.4 }, 3, 0, 1, 'none');
+  tw(B, { x: 3.2, y: 1.4, z: -9, rz: 0.45, ry: 2.2 }, 3, 0.2, 1.0, 'power2.in');
+
+  // ── 05 ICE WORLD — la cámara atraviesa el corredor de cristales ───────
+  tw(world, { pos: 3 }, 4, 0, 0.38);
+  tw(sets, { pink: 0 }, 4, 0, 0.3);
+  tw(sets, { ice: 1 }, 4, 0, 0.35);
+  tw(A, { z: -22 }, 4, 0.05, 1.0, 'power1.inOut');
+  tw(cam, { tz: -22 }, 4, 0.05, 1.0, 'power1.inOut');
+  tw(cam, { theta: 0.18 }, 4, 0, 0.45);
+  tw(cam, { theta: -0.12 }, 4, 0.45, 1);
+  tw(cam, { r: 2.5 }, 4, 0, 0.6);
+  tw(cam, { phi: 0.02 }, 4, 0, 0.6);
+  tw(cam, { roll: -0.14 }, 4, 0.1, 0.5);
+  tw(cam, { roll: 0.08 }, 4, 0.5, 1);
+  tw(cam, { fov: 36 }, 4, 0, 1);
+  tw(A, { rx: 0.9, rz: -0.25, y: 0 }, 4, 0, 1);
+  tw(A, { ry: 3.6 }, 4, 0, 1, 'none');
+  tw(fx, { aperture: 0.7 }, 4, 0, 0.5);
+
+  // ── 06 WHITE FLASH — sobreexposición + corte de cámara oculto ────────
+  tw(world, { pos: 4 }, 5, 0, 0.45, 'power1.in');
+  tw(world, { pos: 5 }, 5, 0.5, 1.0, 'power1.out');
+  tw(fx, { flash: 1 }, 5, 0.08, 0.47, 'power2.in');
+  tw(fx, { flash: 0 }, 5, 0.53, 1.0, 'power2.out');
+  tw(fx, { mblur: 0.7 }, 5, 0, 0.47, 'power2.in');
+  tw(fx, { mblur: 0 }, 5, 0.53, 0.95, 'power2.out');
+  tw(fx, { exposure: 1.5 }, 5, 0.1, 0.47);
+  tw(fx, { exposure: 1 }, 5, 0.53, 1);
+  tw(A, { z: -26.5 }, 5, 0, 0.47, 'power2.in');
+  tw(cam, { tz: -26.5 }, 5, 0, 0.47, 'power2.in');
+  tw(cam, { r: 1.3, fov: 58 }, 5, 0, 0.47, 'power2.in');
+  set(cam, { tx: 0, ty: 0, tz: 0, r: 6.2, theta: -1.35, phi: -0.06, fov: 48, roll: 0.1 }, 5, 0.5);
+  set(A, { show: 0 }, 5, 0.5);
+  set(B, { x: 0, y: -0.25, z: 0, rx: 0, ry: -1, rz: 0.18, show: 1, s: 1 }, 5, 0.5);
+  set(sets, { ice: 0 }, 5, 0.5);
+  tw(cam, { fov: 40, r: 5.2, theta: -1.0 }, 5, 0.53, 1.0, 'power2.out');
+  tw(sets, { green: 1 }, 5, 0.5, 1.0, 'power2.out');
+
+  // ── 07 GREEN UNIVERSE — ascenso + cámara orbital ──────────────────────
+  tw(cam, { theta: 0.85 }, 6, 0, 1);
+  tw(cam, { r: 3.7 }, 6, 0, 0.8);
+  tw(cam, { fov: 32 }, 6, 0, 0.6);
+  tw(cam, { phi: 0.22 }, 6, 0, 1);
+  tw(cam, { ty: 0.95 }, 6, 0.1, 1.0);
+  tw(B, { y: 0.9 }, 6, 0.1, 1.0);
+  tw(cam, { roll: -0.06 }, 6, 0, 0.6);
+  tw(cam, { roll: 0 }, 6, 0.6, 1);
+  tw(B, { ry: 2.2, rz: -0.1 }, 6, 0, 1);
+  tw(sets, { greenRise: 5 }, 6, 0, 1, 'none');
+  tw(p, { rise: 4 }, 6, 0, 1, 'none');
+  tw(fx, { aperture: 0.85 }, 6, 0, 0.5);
+
+  // ── 08 METALLIC WORLD — superficie metálica, luz volumétrica ──────────
+  tw(world, { pos: 6 }, 7, 0, 0.4);
+  tw(sets, { green: 0 }, 7, 0, 0.35);
+  tw(sets, { floor: 1 }, 7, 0.12, 0.5);
+  tw(sets, { stage: 1 }, 7, 0.2, 0.6, 'power2.out');
+  tw(sets, { cones: 1 }, 7, 0.35, 0.75);
+  set(A, { show: 1, x: -3.6, y: 0.05, z: -1.2, rx: 0, rz: 0.08, ry: 0 }, 7, 0.0);
+  tw(A, { x: -0.72, z: 0.35 }, 7, 0.08, 0.7, 'power3.out');
+  tw(A, { ry: 1.2 }, 7, 0, 1, 'none');
+  tw(B, { y: 0.06, x: 0.74, z: -0.5, rz: -0.06 }, 7, 0, 0.65, 'power2.inOut');
+  tw(B, { ry: 3.2 }, 7, 0, 1, 'none');
+  tw(cam, { ty: 0.05 }, 7, 0, 0.6);
+  tw(cam, { theta: 0.15 }, 7, 0, 1);
+  tw(cam, { phi: 0.035 }, 7, 0, 0.6);
+  tw(cam, { r: 4.1 }, 7, 0, 1);
+  tw(cam, { tx: 0.5 }, 7, 0, 0.35);
+  tw(cam, { tx: -0.25 }, 7, 0.35, 1);
+  tw(cam, { fov: 30 }, 7, 0, 1);
+  tw(fx, { aperture: 0.5 }, 7, 0, 0.5);
+  tw(p, { rise: 4.6 }, 7, 0, 1, 'none');
+
+  // ── 09 CAMERA JOURNEY — túnel infinito de partículas y geometría ──────
+  tw(world, { pos: 7 }, 8, 0, 0.38);
+  tw(sets, { floor: 0, stage: 0 }, 8, 0, 0.25);
+  tw(sets, { cones: 0 }, 8, 0, 0.2);
+  tw(sets, { journey: 1 }, 8, 0.05, 0.25);
+  tw(sets, { journey: 0 }, 8, 0.85, 1.0);
+  tw(A, { x: -1.9, z: 6.5 }, 8, 0.05, 0.36, 'power2.in');
+  tw(B, { x: 1.9, z: 6.5 }, 8, 0.08, 0.39, 'power2.in');
+  set(A, { x: -0.55, y: 0, z: -80, rx: 0.25, rz: 0.1 }, 8, 0.42);
+  set(B, { x: 0.55, y: 0, z: -80, rx: -0.25, rz: -0.1 }, 8, 0.42);
+  tw(A, { z: -4.5, rx: 0 }, 8, 0.45, 1.0, 'power3.out');
+  tw(B, { z: -4.5, rx: 0 }, 8, 0.45, 1.0, 'power3.out');
+  tw(cam, { tx: 0, ty: 0, tz: -6, r: 6, theta: 0, phi: 0 }, 8, 0, 0.32, 'power2.inOut');
+  tw(cam, { fov: 60 }, 8, 0.15, 0.5, 'power2.in');
+  tw(cam, { fov: 34 }, 8, 0.6, 1.0, 'power2.out');
+  tw(cam, { roll: 0.42 }, 8, 0.2, 0.6);
+  tw(cam, { roll: 0 }, 8, 0.6, 1.0);
+  tw(p, { flow: 150 }, 8, 0.1, 0.95, 'power2.inOut');
+  tw(fx, { aperture: 0.3 }, 8, 0, 0.4);
+
+  // ── 10 ABSTRACT TRANSFORMATION — morphing, escala, luz y órbita 360° ──
+  tw(world, { pos: 10 }, 9, 0, 1, 'none');
+  tw(cam, { tz: -4.5 }, 9, 0, 0.25);
+  tw(cam, { tz: 0 }, 9, 0.3, 1.0);
+  tw(cam, { r: 3.4 }, 9, 0, 0.35);
+  tw(cam, { r: 4.4 }, 9, 0.5, 1.0);
+  tw(cam, { theta: TAU }, 9, 0.12, 1.0);
+  tw(cam, { phi: 0.38 }, 9, 0.15, 0.55);
+  tw(cam, { phi: 0.07 }, 9, 0.55, 1.0);
+  tw(cam, { roll: 0.16 }, 9, 0.2, 0.55);
+  tw(cam, { roll: 0 }, 9, 0.55, 1.0);
+  tw(cam, { fov: 30 }, 9, 0, 0.5);
+  tw(A, { x: -1.05, s: 1.45 }, 9, 0.05, 0.4);
+  tw(A, { x: -0.52, s: 1 }, 9, 0.55, 0.95);
+  tw(A, { morph: 1 }, 9, 0.15, 0.42, 'power2.inOut');
+  tw(A, { morph: 0 }, 9, 0.55, 0.85, 'power2.inOut');
+  tw(A, { ry: 1.2 + TAU }, 9, 0, 1, 'none');
+  tw(A, { z: 0 }, 9, 0.3, 1.0);
+  tw(A, { y: -0.14, rz: 0.04 }, 9, 0.6, 1.0);
+  tw(B, { x: 1.25, s: 0.62 }, 9, 0.05, 0.4);
+  tw(B, { x: 0.52, s: 1 }, 9, 0.55, 0.95);
+  tw(B, { morph: 1 }, 9, 0.22, 0.5, 'power2.inOut');
+  tw(B, { morph: 0 }, 9, 0.6, 0.9, 'power2.inOut');
+  tw(B, { ry: 3.2 - TAU }, 9, 0, 1, 'none');
+  tw(B, { z: 0 }, 9, 0.3, 1.0);
+  tw(B, { y: -0.14, rz: -0.04 }, 9, 0.6, 1.0);
+  tw(fx, { aperture: 0.6 }, 9, 0, 0.5);
+  tw(fx, { distort: 0.5 }, 9, 0.1, 0.4);
+  tw(fx, { distort: 0 }, 9, 0.6, 0.95);
+
+  // ── 11 DUAL COMPOSITION — simetría, contraluz rojo, haces de luz ──────
+  tw(sets, { floor: 1 }, 10, 0, 0.4);
+  tw(sets, { cones: 1 }, 10, 0.1, 0.5);
+  tw(cam, { r: 4.0 }, 10, 0, 1);
+  tw(cam, { phi: 0.045, ty: 0.12, fov: 27 }, 10, 0, 1);
+  tw(A, { ry: 1.8 + TAU }, 10, 0, 1, 'none');
+  tw(B, { ry: 2.6 - TAU }, 10, 0, 1, 'none');
+  tw(fx, { aperture: 0.75 }, 10, 0, 0.5);
+
+  // ── 12 FINAL APPROACH — dolly-out lento, las partículas convergen ────
+  tw(cam, { r: 8.8 }, 11, 0, 1, 'power1.inOut');
+  tw(cam, { phi: 0.11, ty: -0.42, fov: 30 }, 11, 0, 1);
+  tw(p, { converge: 1 }, 11, 0.1, 0.9, 'power2.inOut');
+  tw(world, { pos: 11 }, 11, 0.15, 0.7);
+  tw(sets, { cones: 0.3 }, 11, 0.3, 1);
+  tw(fx, { aperture: 0.5 }, 11, 0, 1);
+
+  // ── 13 FINAL FRAME — negro y rojo, composición mínima ─────────────────
+  tw(cam, { r: 9.4, phi: 0.1, ty: -0.55 }, 12, 0, 1);
+  tw(fx, { letterbox: 1.8 }, 12, 0, 0.5);
+  tw(fx, { exposure: 0.92 }, 12, 0, 1);
+  tw(sets, { cones: 0 }, 12, 0, 0.6);
+
+  // Encuadre: desplaza el sujeto al lado opuesto del texto (film offset)
+  const SHIFT = [-3, -2, 3.5, -3, 3, 0, -3, 3, 0, -3, 0, 3, 0];
+  for (let i = 1; i < SC.length; i++) tw(cam, { shift: SHIFT[i] }, i, 0, 0.45);
+
+  // Captions: entrada por máscara de línea y salida antes del corte
+  $$('.cap').forEach((cap) => {
+    const i = +cap.dataset.i;
+    const lines = cap.querySelectorAll('.ln > span');
+    const meta = cap.querySelector('.cap__meta');
+    const subs = Array.from(cap.querySelectorAll('.cap__sub, .replay'));
+    const inA = i === 5 ? 0.3 : 0.12;
+    const outA = i === 5 ? 0.66 : 0.74;
+    if (i > 0) {
+      tl.fromTo(cap, { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.01 }, at(i, inA));
+      tl.fromTo(lines, { yPercent: 115 }, { yPercent: 0, duration: 0.24 * SC[i].dur, stagger: 0.05, ease: 'power3.out' }, at(i, inA));
+      tl.fromTo(meta, { autoAlpha: 0, x: -24 }, { autoAlpha: 1, x: 0, duration: 0.2 * SC[i].dur, ease: 'power2.out' }, at(i, inA + 0.03));
+      if (subs.length) tl.fromTo(subs, { autoAlpha: 0, y: 16 }, { autoAlpha: 1, y: 0, duration: 0.2 * SC[i].dur, stagger: 0.04, ease: 'power2.out' }, at(i, inA + 0.08));
+    } else {
+      gsap.set(cap, { autoAlpha: 1 });
+    }
+    if (i < 12) {
+      tl.to(lines, { yPercent: -115, duration: 0.18 * SC[i].dur, stagger: 0.04, ease: 'power2.in' }, at(i, outA));
+      tl.to([meta, ...subs], { autoAlpha: 0, duration: 0.14 * SC[i].dur }, at(i, outA));
+      tl.to(cap, { autoAlpha: 0, duration: 0.01 }, at(i, Math.min(0.98, outA + 0.24)));
+    }
+  });
+
+  tl.to({}, { duration: 0.001 }, C.TOTAL);
+
+  const st = (C.st = ScrollTrigger.create({
+    trigger: '#film',
+    start: 'top top',
+    end: () => '+=' + Math.round(C.TOTAL * window.innerHeight * (C.mobile ? 0.72 : 0.8)),
+    pin: true,
+    anticipatePin: 1,
+    scrub: C.mobile ? 0.9 : 1.25,
+    animation: tl,
+    invalidateOnRefresh: true,
+  }));
+
+  /* ------------------------------------------------------------------
+     9. HUD + navegación por escenas
+     ------------------------------------------------------------------ */
+  const track = $('#track');
+  const segs = SC.map((s, i) => {
+    const b = document.createElement('button');
+    b.className = 'seg'; b.type = 'button';
+    b.style.flexGrow = s.dur;
+    b.setAttribute('aria-label', `Escena ${s.n}: ${s.name}`);
+    b.innerHTML = `<i></i><span>${s.n} ${s.name}</span>`;
+    b.addEventListener('click', () => C.goTo(i));
+    track.appendChild(b);
+    b._fill = b.querySelector('i'); b._v = -1;
+    return b;
+  });
+  C.goTo = (i) => {
+    const s = SC[i];
+    const prog = i === 0 ? 0 : (s.start + s.dur * 0.35) / C.TOTAL;
+    window.scrollTo({ top: st.start + (st.end - st.start) * prog, behavior: C.reduced ? 'auto' : 'smooth' });
+  };
+  $('#replay').addEventListener('click', () => C.goTo(0));
+
+  const hudN = $('#hud-n'), hudName = $('#hud-name'), hudTc = $('#hud-tc');
+  const fxblack = $('#fxblack'), flashEl = $('#flash'), scrim = $('#scrim');
+  let lastScene = -1, lastTc = '';
+  const pad = (n) => String(n).padStart(2, '0');
+
+  function hud() {
+    const time = tl.time();
+    let idx = 0;
+    for (let i = 0; i < SC.length; i++) if (time >= SC[i].start - 1e-6) idx = i;
+    if (idx !== lastScene) {
+      lastScene = idx;
+      hudN.textContent = `Esc ${SC[idx].n} / ${SC.length}`;
+      hudName.textContent = SC[idx].name;
+      segs.forEach((b, i) => b.classList.toggle('is-active', i === idx));
+    }
+    for (let i = 0; i < SC.length; i++) {
+      const v = Math.round(clamp((time - SC[i].start) / SC[i].dur, 0, 1) * 500) / 500;
+      if (v !== segs[i]._v) { segs[i]._v = v; segs[i]._fill.style.transform = `scaleX(${v})`; }
+    }
+    const secs = (time / C.TOTAL) * 132;
+    const tc = `00:${pad(Math.floor(secs / 60))}:${pad(Math.floor(secs % 60))}:${pad(Math.floor((secs % 1) * 24))}`;
+    if (tc !== lastTc) { lastTc = tc; hudTc.textContent = tc; }
+    root.style.setProperty('--lb', S.fx.letterbox.toFixed(3));
+    fxblack.style.opacity = (1 - C.intro.v).toFixed(3);
+    scrim.style.opacity = (1 - S.fx.flash).toFixed(3);
+
+    if (C.mode === 'css' || C.mode === 'hybrid') renderCSSBackdrop();
+    if (C.mode === 'css') { renderCSSCans(); flashEl.style.opacity = S.fx.flash.toFixed(3); }
+  }
+  gsap.ticker.add(hud);
+
+  /* ------------------------------------------------------------------
+     10. RENDER CSS (fallback sin WebGL / híbrido en file://)
+     ------------------------------------------------------------------ */
+  function renderCSSBackdrop() {
+    const P = C.PLAYLIST;
+    const wp = clamp(S.world.pos, 0, P.length - 1);
+    const i0 = Math.floor(wp), i1 = Math.min(i0 + 1, P.length - 1), f = wp - i0;
+    const a = P[i0], b = P[i1];
+    if (C.mode === 'css') {
+      const c = S.cam;
+      C.view.yaw = -Math.sin(c.theta) * 0.6;
+      C.view.pitch = -c.phi * 0.5;
+      C.view.roll = c.roll;
+      C.view.zoom = 1.04 + clamp((7 - c.r) / 7, -0.2, 1) * 0.1;
+      C.view.trans = a !== b ? Math.sin(Math.PI * f) : 0;
+    }
+    const v = C.view;
+    const tf = `translate3d(${(-v.yaw * 8).toFixed(3)}%, ${(v.pitch * 8).toFixed(3)}%, 0) rotate(${v.roll.toFixed(4)}rad) scale(${v.zoom.toFixed(4)})`;
+    const filt = v.trans > 0.02 ? `blur(${(v.trans * 7).toFixed(2)}px) brightness(${(1 + v.trans * 0.25).toFixed(3)})` : 'none';
+    C.bgLayers.forEach((el, k) => {
+      let o = 0, z = 0;
+      if (k === a) { o = 1; z = 1; }
+      if (k === b && b !== a) { o = f * f * (3 - 2 * f); z = 2; }
+      if (el._o !== o) { el.style.opacity = o.toFixed(3); el._o = o; }
+      if (o > 0) { el.style.transform = tf; el.style.zIndex = z; el.style.filter = filt; }
+    });
+  }
+
+  // Proyección mínima de la cámara para los cilindros CSS
+  const cans = { A: $('.ccan--a'), B: $('.ccan--b') };
+  function renderCSSCans() {
+    const c = S.cam, w = window.innerWidth, h = window.innerHeight, aspect = w / h;
+    const pk = aspect < 1 ? 1 + Math.min((1 / aspect - 1) * 0.55, 1.1) : 1;
+    const r = c.r * (1 + (pk - 1) * clamp((c.r - 0.6) / 2, 0, 1));
+    const px = c.tx + r * Math.sin(c.theta) * Math.cos(c.phi);
+    const py = c.ty + r * Math.sin(c.phi);
+    const pz = c.tz + r * Math.cos(c.theta) * Math.cos(c.phi);
+    let fx_ = c.tx - px, fy = c.ty - py, fz = c.tz - pz;
+    const fl = Math.hypot(fx_, fy, fz) || 1; fx_ /= fl; fy /= fl; fz /= fl;
+    let rx = -fz, rz = fx_; const rl = Math.hypot(rx, rz) || 1; rx /= rl; rz /= rl; // right = f × up
+    const ux = -rz * fy, uy = rz * fx_ - rx * fz, uz = rx * fy;                  // up = right × f
+    const cr = Math.cos(c.roll), sr = Math.sin(c.roll);
+    const focal = (h / 2) / Math.tan((c.fov * Math.PI) / 360);
+    for (const k of ['A', 'B']) {
+      const o = S[k], el = cans[k];
+      const vx = o.x - px, vy = o.y - py, vz = o.z - pz;
+      const zc = vx * fx_ + vy * fy + vz * fz;
+      if (o.show < 0.01 || zc < 0.2) { el.style.opacity = 0; continue; }
+      let xc = vx * rx + vz * rz, yc = vx * ux + vy * uy + vz * uz;
+      const xr = xc * cr + yc * sr, yr = -xc * sr + yc * cr;
+      const shiftPx = aspect > 1.15 ? -(c.shift / 35 / (2 * Math.tan((c.fov * Math.PI) / 360) * aspect)) * w : 0;
+      const sc = (focal / zc) * o.s * o.show;
+      const wpx = 0.66 * sc, hpx = (1.22 - o.morph * 0.3) * sc;
+      el.style.opacity = Math.min(1, o.show * 1.5);
+      el.style.width = wpx.toFixed(1) + 'px';
+      el.style.height = hpx.toFixed(1) + 'px';
+      el.style.transform = `translate3d(${(w / 2 + shiftPx + (xr / zc) * focal - wpx / 2).toFixed(1)}px, ${(h / 2 - (yr / zc) * focal - hpx / 2).toFixed(1)}px, 0) rotate(${(-o.rz + c.roll).toFixed(4)}rad)`;
+      el.style.setProperty('--rv', o.reveal.toFixed(3));
+      el.style.setProperty('--mo', o.morph.toFixed(3));
+      el.style.zIndex = Math.round(1000 - zc * 10);
+    }
+  }
+
+  window.addEventListener('load', () => ScrollTrigger.refresh());
+})();
+</script>
+
+<!-- =====================================================================
+     MOTOR WEBGL — Three.js. Construye los escenarios 3D y renderiza el
+     estado `CINE.S` en cada frame. Si algo falla, cae al modo CSS.
+     ===================================================================== -->
+<script type="module">
+const C = window.CINE;
+if (C && C.mode === 'pending') {
+  C.engineStarted = true;
+  boot().catch((err) => {
+    console.warn('[Dos Mundos] Motor WebGL no disponible, usando modo alternativo.', err);
+    C.enterFallback('error');
+  });
+}
+
+const yieldFrame = () => new Promise((r) => setTimeout(r, 0));
+
+async function boot() {
+  if (!C.hasWebGL) { C.enterFallback('nowebgl'); return; }
+
+  let THREE, EffectComposer, RenderPass, UnrealBloomPass, OutputPass, ShaderPass, Reflector;
+  try {
+    const m = await Promise.all([
+      import('three'),
+      import('three/addons/postprocessing/EffectComposer.js'),
+      import('three/addons/postprocessing/RenderPass.js'),
+      import('three/addons/postprocessing/UnrealBloomPass.js'),
+      import('three/addons/postprocessing/OutputPass.js'),
+      import('three/addons/postprocessing/ShaderPass.js'),
+      import('three/addons/objects/Reflector.js'),
+    ]);
+    THREE = m[0];
+    ({ EffectComposer } = m[1]); ({ RenderPass } = m[2]); ({ UnrealBloomPass } = m[3]);
+    ({ OutputPass } = m[4]); ({ ShaderPass } = m[5]); ({ Reflector } = m[6]);
+  } catch (err) {
+    console.warn('[Dos Mundos] No se pudo cargar Three.js desde el CDN.', err);
+    C.enterFallback('cdn');
+    return;
+  }
+  C.setProgress(0.6, 'Motor 3D cargado');
+  await C.assetsReady;
+  if (C.mode !== 'pending') return;
+
+  const S = C.S, Q = C.Q, P = C.PLAYLIST;
+  const hybrid = !!C.tainted;            // file:// → fondo por CSS, 3D transparente encima
+  const TAU = Math.PI * 2;
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  const smooth = (e0, e1, x) => { const t = clamp((x - e0) / (e1 - e0), 0, 1); return t * t * (3 - 2 * t); };
+  const rand = (() => { let s = 1337; return () => ((s = (s * 16807) % 2147483647) - 1) / 2147483646; })();
+  const rr = (a, b) => a + (b - a) * rand();
+
+  /* =====================================================================
+     1. RENDERER · ESCENA · CÁMARA · POSTPROCESO
+     ===================================================================== */
+  const canvas = document.getElementById('gl');
+  const vw = () => canvas.clientWidth || window.innerWidth;
+  const vh = () => canvas.clientHeight || window.innerHeight;
+
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: hybrid, stencil: false, powerPreference: 'high-performance' });
+  renderer.setClearColor(0x000000, hybrid ? 0 : 1);
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  let dpr = Math.min(window.devicePixelRatio || 1, Q.dprStart);
+  renderer.setPixelRatio(dpr);
+  renderer.setSize(vw(), vh(), false);
+  const maxAniso = renderer.capabilities.getMaxAnisotropy();
+
+  let running = true;
+  canvas.addEventListener('webglcontextlost', (e) => {
+    e.preventDefault();
+    running = false;
+    C.enterFallback('context-lost');
+  }, false);
+
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0x000000, 0.03);
+  const camera = new THREE.PerspectiveCamera(30, vw() / vh(), 0.03, 260);
+  camera.layers.enable(1);               // capa 1 = fondo (excluido de reflejos)
+  scene.add(camera);
+
+  const rt = new THREE.WebGLRenderTarget(vw() * dpr, vh() * dpr, { type: THREE.HalfFloatType, samples: Q.msaa });
+  const composer = new EffectComposer(renderer, rt);
+  composer.setPixelRatio(dpr);
+  composer.setSize(vw(), vh());
+  composer.addPass(new RenderPass(scene, camera));
+  const bloom = new UnrealBloomPass(new THREE.Vector2(vw(), vh()), 0.7, 0.55, 0.78);
+  // Prefiltro Karis (4 taps ponderados por luminancia) + límite HDR antes del bloom:
+  // suprime "fireflies" de píxel único que el blur separable convertiría en cuadrados.
+  const hp = bloom.materialHighPassFilter;
+  hp.uniforms.uTexel = { value: new THREE.Vector2(1 / 1920, 1 / 1080) };
+  hp.fragmentShader = hp.fragmentShader
+    .replace('void main() {', `uniform vec2 uTexel;
+      vec4 karisTap(vec2 uv, out float w) { vec4 c = texture2D(tDiffuse, uv); w = 1.0 / (1.0 + dot(c.rgb, vec3(0.299, 0.587, 0.114))); return c * w; }
+      vec4 karis(vec2 uv) {
+        float wa, wb, wc, wd;
+        vec4 s = karisTap(uv + uTexel * vec2(-1.0, -1.0), wa) + karisTap(uv + uTexel * vec2(1.0, -1.0), wb)
+               + karisTap(uv + uTexel * vec2(-1.0, 1.0), wc) + karisTap(uv + uTexel * vec2(1.0, 1.0), wd);
+        return s / (wa + wb + wc + wd);
+      }
+      void main() {`)
+    .replace('vec4 texel = texture2D( tDiffuse, vUv );', 'vec4 texel = min( karis( vUv ), vec4( 4.0 ) );');
+  hp.needsUpdate = true;
+  composer.addPass(bloom);
+  composer.addPass(new OutputPass());
+
+  /* =====================================================================
+     2. GLSL COMPARTIDO
+     ===================================================================== */
+  const NOISE = /* glsl */`
+    float hash12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
+    float vnoise(vec2 p) {
+      vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
+      return mix(mix(hash12(i), hash12(i + vec2(1.0, 0.0)), u.x), mix(hash12(i + vec2(0.0, 1.0)), hash12(i + vec2(1.0, 1.0)), u.x), u.y);
+    }
+    float fbm(vec2 p) { float s = 0.0; float a = 0.5; for (int i = 0; i < 4; i++) { s += a * vnoise(p); p = p * 2.03 + vec2(17.1, 9.2); a *= 0.5; } return s; }
+  `;
+
+  // Blending aditivo con color premultiplicado (alpha correcto en modo híbrido)
+  const additive = (m) => {
+    m.transparent = true; m.depthWrite = false;
+    m.blending = THREE.CustomBlending;
+    m.blendEquation = THREE.AddEquation;
+    m.blendSrc = THREE.OneFactor; m.blendDst = THREE.OneFactor;
+    return m;
+  };
+
+  /* =====================================================================
+     3. POST FINAL: distorsión, motion blur radial, DOF, aberración,
+        destello, viñeta y grano
+     ===================================================================== */
+  const finalPass = new ShaderPass({
+    uniforms: {
+      tDiffuse: { value: null }, uRes: { value: new THREE.Vector2(1, 1) }, uTime: { value: 0 },
+      uFlash: { value: 0 }, uAberr: { value: 0.3 }, uBlur: { value: 0 }, uDof: { value: 0 },
+      uVignette: { value: 0.85 }, uGrain: { value: 1 }, uDistort: { value: 0 }, uAlphaOut: { value: hybrid ? 1 : 0 },
+    },
+    vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: /* glsl */`
+      uniform sampler2D tDiffuse; uniform vec2 uRes; uniform float uTime; uniform float uFlash; uniform float uAberr;
+      uniform float uBlur; uniform float uDof; uniform float uVignette; uniform float uGrain; uniform float uDistort; uniform float uAlphaOut;
+      varying vec2 vUv;
+      ${NOISE}
+      void main() {
+        vec2 uv = vUv;
+        if (uDistort > 0.001) {
+          uv += (vec2(fbm(uv * 3.5 + uTime * 0.35), fbm(uv * 3.5 + vec2(3.1, 7.7) - uTime * 0.3)) - 0.5) * 0.014 * uDistort;
+        }
+        vec2 c = uv - 0.5;
+        float r = length(c * vec2(uRes.x / uRes.y, 1.0));
+        vec4 base = texture2D(tDiffuse, uv);
+        vec3 col = base.rgb;
+        float ab = (uAberr * 0.0022 + uDistort * 0.006) * r;
+        if (ab > 0.00002) {
+          vec2 dir = c / max(length(c), 1e-4);
+          col.r = texture2D(tDiffuse, uv + dir * ab).r;
+          col.b = texture2D(tDiffuse, uv - dir * ab).b;
+        }
+        float zb = uBlur * smoothstep(0.04, 0.75, r);
+        float db = uDof * smoothstep(0.16, 0.8, r);
+        float bl = zb + db;
+        if (bl > 0.0008) {
+          vec3 acc = vec3(0.0);
+          float jit = hash12(gl_FragCoord.xy + fract(uTime) * 61.0);
+          for (int i = 0; i < 10; i++) {
+            float fi = (float(i) + jit) / 10.0;
+            float ang = fi * 6.2831853 * 2.618;
+            vec2 off = -c * zb * 0.11 * fi + vec2(cos(ang), sin(ang)) * vec2(uRes.y / uRes.x, 1.0) * db * 0.011 * sqrt(fi);
+            acc += texture2D(tDiffuse, uv + off).rgb;
+          }
+          col = mix(col, acc / 10.0, clamp(bl * 14.0, 0.0, 1.0));
+        }
+        col = mix(col, vec3(1.0), uFlash * 0.9) + uFlash * 0.08;
+        col *= mix(1.0, smoothstep(1.2, 0.3, r), uVignette);
+        col += (hash12(gl_FragCoord.xy * 0.5 + fract(uTime * 7.13) * 431.0) - 0.5) * 0.03 * uGrain;
+        float a = mix(1.0, clamp(max(base.a, max(col.r, max(col.g, col.b))) + uFlash, 0.0, 1.0), uAlphaOut);
+        gl_FragColor = vec4(col, a);
+      }`,
+  });
+  composer.addPass(finalPass);
+
+  /* =====================================================================
+     4. TEXTURAS DE FONDO (los 8 PNG del ZIP)
+     ===================================================================== */
+  const srcTex = C.images.map((img, i) => {
+    const ok = img && img.complete && img.naturalWidth > 0 && !hybrid;
+    const t = new THREE.Texture(ok ? img : C.placeholder(i));
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.wrapS = t.wrapT = THREE.MirroredRepeatWrapping;
+    t.anisotropy = Math.min(4, maxAniso);
+    t.needsUpdate = true;
+    return t;
+  });
+  C.setProgress(0.64, 'Construyendo escenarios');
+  await yieldFrame();
+
+  /* =====================================================================
+     5. FONDO 3D — plano de cámara con parallax, capas de bruma,
+        niebla volumétrica y transición por disolución distorsionada
+     ===================================================================== */
+  const U = {
+    uTime: { value: 0 },
+    tA: { value: srcTex[0] }, tB: { value: srcTex[0] }, uMix: { value: 0 },
+  };
+  const bgMat = new THREE.ShaderMaterial({
+    uniforms: {
+      tA: U.tA, tB: U.tB, uMix: U.uMix, uTime: U.uTime,
+      uAspect: { value: 1 }, uImgAspect: { value: 16 / 9 }, uZoom: { value: 1.15 }, uGain: { value: 1.2 },
+      uHaze: { value: 0.5 }, uHazeCol: { value: new THREE.Color() }, uFog: { value: 0.05 }, uDistort: { value: 0 },
+      uRoll: { value: 0 }, uOff: { value: new THREE.Vector2() }, uOff2: { value: new THREE.Vector2() },
+    },
+    vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.99999, 1.0); }`,
+    fragmentShader: /* glsl */`
+      uniform sampler2D tA; uniform sampler2D tB; uniform float uMix; uniform float uTime; uniform float uAspect; uniform float uImgAspect;
+      uniform float uZoom; uniform float uGain; uniform float uHaze; uniform vec3 uHazeCol; uniform float uFog; uniform float uDistort;
+      uniform float uRoll; uniform vec2 uOff; uniform vec2 uOff2;
+      varying vec2 vUv;
+      ${NOISE}
+      vec2 coverUv(vec2 uv, float zoom, vec2 off, float rot) {
+        vec2 p = uv - 0.5;
+        p.x *= uAspect;
+        float c = cos(rot); float s = sin(rot);
+        p = vec2(c * p.x - s * p.y, s * p.x + c * p.y);
+        p /= max(uAspect / uImgAspect, 1.0) * zoom;
+        p.x /= uImgAspect;
+        return p + 0.5 + off;
+      }
+      float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+      void main() {
+        float m0 = clamp(uMix, 0.0, 1.0);
+        float w = sin(3.14159265 * m0);
+        vec2 q = vUv;
+        vec2 asp = vec2(uAspect, 1.0);
+        vec2 warp = (vec2(fbm(q * asp * 2.4 + uTime * 0.12), fbm(q * asp * 2.4 + vec2(5.2, 1.3) - uTime * 0.1)) - 0.5) * (0.09 * w + 0.025 * uDistort);
+        vec3 a = texture2D(tA, coverUv(q + warp, uZoom * (1.0 + 0.16 * m0), uOff, uRoll)).rgb;
+        vec3 b = texture2D(tB, coverUv(q - warp, uZoom * (0.86 + 0.14 * m0), uOff, uRoll)).rgb;
+        float n = fbm(q * asp * 1.8 + vec2(uTime * 0.04, -uTime * 0.03));
+        float th = m0 * 1.3 - 0.15;
+        float m = 1.0 - smoothstep(th - 0.12, th + 0.12, n);
+        vec3 col = mix(a, b, m);
+        float edge = (1.0 - smoothstep(0.0, 0.1, abs(n - th))) * w;
+        vec2 uvH = coverUv(q, uZoom * 1.75, uOff2, uRoll * 1.15);
+        vec3 h = mix(texture2D(tA, uvH).rgb, texture2D(tB, uvH).rgb, m);
+        col += h * max(luma(h) - 0.05, 0.0) * uHaze * 2.2;
+        float f = fbm(q * asp * 1.3 + uOff2 * 2.0 + vec2(uTime * 0.018, uTime * 0.011));
+        col += uHazeCol * (f * f * uFog + edge * 0.35);
+        gl_FragColor = vec4(col * uGain, 1.0);
+      }`,
+    depthWrite: false, depthTest: false,
+  });
+  const backdrop = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), bgMat);
+  backdrop.frustumCulled = false;
+  backdrop.renderOrder = -100;
+  backdrop.layers.set(1);
+  backdrop.visible = !hybrid;
+  scene.add(backdrop);
+
+  /* =====================================================================
+     6. TEXTURAS PROCEDURALES — metal cepillado, banda de color, gotas
+     ===================================================================== */
+  function canTextures(c1, c2, c3) {
+    const W = Q.texW, H = W / 2;
+    const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    const ov = document.createElement('canvas'); ov.width = W; ov.height = H;
+    const g = cv.getContext('2d'), o = ov.getContext('2d');
+    // Aluminio cepillado (vetas horizontales = circunferenciales)
+    g.fillStyle = '#c4c9d0'; g.fillRect(0, 0, W, H);
+    o.fillStyle = 'rgb(255,112,255)'; o.fillRect(0, 0, W, H);   // G: rugosidad · B: metal
+    for (let i = 0; i < H * 1.6; i++) {
+      const y = rand() * H, h = rand() * 1.4 + 0.3, a = rand() * 0.09;
+      g.fillStyle = rand() < 0.5 ? `rgba(255,255,255,${a})` : `rgba(30,34,42,${a})`;
+      g.fillRect(0, y, W, h);
+      o.fillStyle = `rgba(255,${(96 + rand() * 48) | 0},255,0.5)`;
+      o.fillRect(0, y, W, h);
+    }
+    // Banda de color con bordes ondulados (periodos enteros → sin costura)
+    const top = (1 - 0.76) * H, bot = (1 - 0.16) * H;
+    const wv = (x, amp, per, ph) => Math.sin((x / W) * TAU * per + ph) * amp;
+    const band = (ctx) => {
+      ctx.beginPath(); ctx.moveTo(0, top + wv(0, H * 0.03, 2, 0));
+      for (let x = 0; x <= W; x += 8) ctx.lineTo(x, top + wv(x, H * 0.03, 2, 0));
+      for (let x = W; x >= 0; x -= 8) ctx.lineTo(x, bot + wv(x, H * 0.015, 3, 1.3));
+      ctx.closePath();
+    };
+    const grd = g.createLinearGradient(0, top - H * 0.03, 0, bot + H * 0.02);
+    grd.addColorStop(0, c3); grd.addColorStop(0.35, c2); grd.addColorStop(1, c1);
+    band(g); g.fillStyle = grd; g.fill();
+    band(o); o.fillStyle = 'rgb(255,60,150)'; o.fill();
+    // Facetas cristalinas sutiles dentro de la banda
+    g.save(); band(g); g.clip();
+    const cols = 32, cw = W / cols, rows = 9, rh = (bot - top) / rows;
+    for (let cx = 0; cx <= cols; cx++) for (let ry = -1; ry <= rows + 1; ry++) {
+      const x = cx * cw + (ry % 2 ? cw / 2 : 0), y = top + ry * rh;
+      g.fillStyle = rand() < 0.5 ? `rgba(255,255,255,${rand() * 0.07})` : `rgba(0,0,0,${rand() * 0.09})`;
+      for (const ox of [0, -W]) {
+        g.beginPath(); g.moveTo(x + ox, y - rh / 2); g.lineTo(x + ox + cw / 2, y); g.lineTo(x + ox, y + rh / 2); g.lineTo(x + ox - cw / 2, y); g.closePath(); g.fill();
+      }
+    }
+    g.globalAlpha = 0.07; g.strokeStyle = '#fff'; g.lineWidth = Math.max(1, W / 1400);
+    for (let x = -H; x < W + H; x += W / 48) { g.beginPath(); g.moveTo(x, top - 40); g.lineTo(x + (bot - top) * 0.6, bot + 40); g.stroke(); }
+    g.restore(); g.globalAlpha = 1;
+    // Filetes plateados y anillos de acento
+    g.lineWidth = Math.max(2, H * 0.005); g.strokeStyle = 'rgba(255,255,255,.85)';
+    g.beginPath(); for (let x = 0; x <= W; x += 8) { const y = top - H * 0.012 + wv(x, H * 0.03, 2, 0); x ? g.lineTo(x, y) : g.moveTo(x, y); } g.stroke();
+    g.fillStyle = c2; g.fillRect(0, (1 - 0.865) * H, W, H * 0.007); g.fillRect(0, (1 - 0.085) * H, W, H * 0.007);
+    const map = new THREE.CanvasTexture(cv);
+    map.colorSpace = THREE.SRGBColorSpace; map.anisotropy = maxAniso;
+    const orm = new THREE.CanvasTexture(ov);
+    orm.anisotropy = maxAniso;
+    return { map, orm };
+  }
+
+  function dropletNormalMap(N) {
+    const c = document.createElement('canvas'); c.width = c.height = N;
+    const g = c.getContext('2d');
+    g.fillStyle = '#000'; g.fillRect(0, 0, N, N);
+    const drop = (x, y, r, a, sy = 1) => {
+      for (const dx of [-N, 0, N]) for (const dy of [-N, 0, N]) {
+        const X = x + dx, Y = y + dy;
+        if (X + r < 0 || X - r > N || Y + r * sy < 0 || Y - r * sy > N) continue;
+        g.save(); g.translate(X, Y); g.scale(1, sy);
+        const gr = g.createRadialGradient(0, -r * 0.08, 0, 0, 0, r);
+        gr.addColorStop(0, `rgba(255,255,255,${a})`); gr.addColorStop(0.55, `rgba(255,255,255,${a * 0.82})`);
+        gr.addColorStop(0.85, `rgba(255,255,255,${a * 0.42})`); gr.addColorStop(1, 'rgba(255,255,255,0)');
+        g.fillStyle = gr; g.beginPath(); g.arc(0, 0, r, 0, TAU); g.fill(); g.restore();
+      }
+    };
+    const k = N / 1024;
+    for (let i = 0; i < 4200; i++) drop(rand() * N, rand() * N, (0.7 + rand() * 1.6) * k, 0.35);
+    for (let i = 0; i < 380; i++) drop(rand() * N, rand() * N, (3 + Math.pow(rand(), 2.4) * 24) * k, 0.95, 1 + rand() * 0.25);
+    for (let i = 0; i < 22; i++) {           // gotas que resbalan
+      const x = rand() * N, y = rand() * N, r = (5 + rand() * 7) * k;
+      drop(x, y, r, 0.95, 1.3);
+      for (let j = 1; j < 14; j++) drop(x + Math.sin(j * 0.6) * 1.5 * k, y - j * r * 0.55, r * (0.55 - j * 0.025), 0.6);
+    }
+    const src = g.getImageData(0, 0, N, N).data;
+    const out = g.createImageData(N, N), d = out.data;
+    const h = (x, y) => src[((((y + N) % N) * N) + ((x + N) % N)) * 4] / 255;
+    const st = 3.2;
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      const nx = (h(x - 1, y) - h(x + 1, y)) * st, ny = (h(x, y + 1) - h(x, y - 1)) * st;
+      const l = Math.hypot(nx, ny, 1), i = (y * N + x) * 4;
+      d[i] = ((nx / l) * 0.5 + 0.5) * 255; d[i + 1] = ((ny / l) * 0.5 + 0.5) * 255; d[i + 2] = ((1 / l) * 0.5 + 0.5) * 255; d[i + 3] = 255;
+    }
+    g.putImageData(out, 0, 0);
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(5, 2.6); t.anisotropy = maxAniso;
+    return t;
+  }
+
+  function noiseTexture(N) {
+    const c = document.createElement('canvas'); c.width = c.height = N;
+    const g = c.getContext('2d'), img = g.createImageData(N, N), d = img.data;
+    const grid = 8, val = [];
+    for (let i = 0; i < (grid + 1) * (grid + 1) * 4; i++) val.push(rand());
+    const vn = (x, y, s) => {
+      const gx = x * s, gy = y * s, ix = Math.floor(gx), iy = Math.floor(gy), fx = gx - ix, fy = gy - iy;
+      const at = (a, b) => val[((a % (grid * 4)) + (b % (grid * 4)) * 37) % val.length];
+      const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
+      return (at(ix, iy) * (1 - ux) + at(ix + 1, iy) * ux) * (1 - uy) + (at(ix, iy + 1) * (1 - ux) + at(ix + 1, iy + 1) * ux) * uy;
+    };
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      const u = x / N, v = y / N;
+      let n = 0, a = 0.5, s = 4;
+      for (let o = 0; o < 5; o++) { n += vn(u, v, s) * a; a *= 0.5; s *= 2; }
+      const rad = Math.max(0, 1 - Math.hypot(u - 0.5, v - 0.5) * 2);
+      const val8 = Math.pow(n, 1.6) * rad * rad * 255 * 1.6;
+      const i = (y * N + x) * 4; d[i] = d[i + 1] = d[i + 2] = Math.min(255, val8); d[i + 3] = 255;
+    }
+    g.putImageData(img, 0, 0);
+    return new THREE.CanvasTexture(c);
+  }
+
+  const texA = canTextures('#7d0029', '#ff2f73', '#ff9fbf');   // rosa
+  const texB = canTextures('#0a5222', '#33ad4b', '#a9e57e');   // verde
+  const dropTex = dropletNormalMap(Q.dropTex);
+  const fogTex = noiseTexture(Q.mobile ? 128 : 256);
+  C.setProgress(0.7, 'Materiales y superficies');
+  await yieldFrame();
+
+  /* =====================================================================
+     7. OBJETOS CILÍNDRICOS ABSTRACTOS (sin etiquetas)
+        Material físico + barrido de revelado + morphing a esfera líquida
+     ===================================================================== */
+  function canGeometry() {
+    const pts = [];
+    const add = (r, y) => pts.push(new THREE.Vector2(r, y));
+    [[0.0001, -0.572], [0.08, -0.574], [0.15, -0.58], [0.2, -0.59], [0.235, -0.603], [0.252, -0.611], [0.268, -0.614],
+     [0.283, -0.611], [0.298, -0.602], [0.312, -0.588], [0.323, -0.568], [0.329, -0.548]].forEach((p) => add(p[0], p[1]));
+    const y0 = -0.53, y1 = 0.445, N = 40;
+    for (let i = 0; i <= N; i++) add(0.33, y0 + ((y1 - y0) * i) / N);
+    [[0.329, 0.462], [0.325, 0.478], [0.317, 0.497], [0.306, 0.517], [0.295, 0.538], [0.286, 0.558], [0.28, 0.575], [0.278, 0.588],
+     [0.281, 0.597], [0.285, 0.606], [0.284, 0.613], [0.277, 0.617], [0.27, 0.613], [0.267, 0.603], [0.258, 0.596],
+     [0.2, 0.594], [0.12, 0.593], [0.0001, 0.593]].forEach((p) => add(p[0], p[1]));
+    const geo = new THREE.LatheGeometry(pts, Q.mobile ? 64 : 112);
+    const pos = geo.attributes.position, uv = geo.attributes.uv;
+    for (let i = 0; i < uv.count; i++) uv.setY(i, (pos.getY(i) + 0.62) / 1.24);
+    uv.needsUpdate = true;
+    return geo;
+  }
+  const canGeo = canGeometry();
+
+  function canMaterial(tex, wipeColor) {
+    const m = new THREE.MeshPhysicalMaterial({
+      map: tex.map, roughnessMap: tex.orm, metalnessMap: tex.orm, roughness: 1, metalness: 1,
+      clearcoat: 1, clearcoatRoughness: 0.09, clearcoatNormalMap: dropTex, clearcoatNormalScale: new THREE.Vector2(0.85, 0.85),
+      envMapIntensity: 1.25,
+    });
+    const u = {
+      uReveal: { value: 0 }, uMorph: { value: 0 }, uTime: U.uTime,
+      uWipeColor: { value: new THREE.Color(wipeColor) }, uChrome: { value: new THREE.Color(0.6, 0.61, 0.65) },
+    };
+    m.onBeforeCompile = (sh) => {
+      Object.assign(sh.uniforms, u);
+      sh.vertexShader = 'uniform float uMorph;\nuniform float uTime;\n' + sh.vertexShader
+        .replace('#include <beginnormal_vertex>', `#include <beginnormal_vertex>
+          vec3 mDir = normalize(position + vec3(0.0, 1e-4, 0.0));
+          objectNormal = normalize(mix(objectNormal, mDir, uMorph));`)
+        .replace('#include <begin_vertex>', `#include <begin_vertex>
+          float mW = sin(mDir.x * 5.0 + uTime * 1.7) * sin(mDir.y * 4.0 - uTime * 1.3) * sin(mDir.z * 5.0 + uTime * 1.1);
+          transformed = mix(transformed, mDir * (0.46 + mW * 0.06 * uMorph), uMorph);`);
+      sh.fragmentShader = 'uniform float uReveal;\nuniform vec3 uWipeColor;\nuniform vec3 uChrome;\n' + sh.fragmentShader
+        .replace('#include <map_fragment>', `
+          vec4 sampledDiffuseColor = texture2D(map, vMapUv);
+          float wipeT = uReveal * 1.24 - 0.12;
+          float wipe = 1.0 - smoothstep(wipeT - 0.015, wipeT + 0.015, vMapUv.y);
+          float wipeEdge = (1.0 - smoothstep(0.0, 0.03, abs(vMapUv.y - wipeT))) * step(0.002, uReveal) * step(uReveal, 0.998);
+          diffuseColor.rgb *= mix(uChrome, sampledDiffuseColor.rgb, wipe);
+          float capTop = smoothstep(0.958, 0.972, vMapUv.y);`)
+        .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+          roughnessFactor = mix(mix(0.13, roughnessFactor, wipe), 0.4, capTop);`)
+        .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
+          metalnessFactor = mix(1.0, metalnessFactor, wipe);`)
+        .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+          totalEmissiveRadiance += uWipeColor * wipeEdge * 4.0;`)
+        .replace('#include <lights_physical_fragment>', `#include <lights_physical_fragment>
+          material.clearcoat *= 1.0 - 0.8 * capTop;`);
+    };
+    m.customProgramCacheKey = () => 'cine-can';
+    m.userData.u = u;
+    return m;
+  }
+
+  const dropMat = new THREE.MeshPhysicalMaterial({
+    color: 0xffffff, metalness: 0, roughness: 0.1, transparent: true, opacity: 0.5,
+    clearcoat: 1, clearcoatRoughness: 0.08, envMapIntensity: 2.4, ior: 1.33,
+  });
+  const dropGeo = new THREE.SphereGeometry(1, 10, 8);
+
+  function makeCan(tex, wipe, seed) {
+    const group = new THREE.Group();
+    group.rotation.order = 'XZY';
+    const mat = canMaterial(tex, wipe);
+    const mesh = new THREE.Mesh(canGeo, mat);
+    group.add(mesh);
+    // Gotas de condensación 3D sobre la superficie
+    const n = Q.surfDrops;
+    const drops = new THREE.InstancedMesh(dropGeo, dropMat, n);
+    const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), s = new THREE.Vector3(), zA = new THREE.Vector3(0, 0, 1), nrm = new THREE.Vector3();
+    for (let i = 0; i < n; i++) {
+      const a = rand() * TAU, y = rr(-0.5, 0.42), sz = 0.004 + Math.pow(rand(), 2.2) * 0.014;
+      nrm.set(Math.sin(a), 0, Math.cos(a));
+      p.copy(nrm).multiplyScalar(0.33 + sz * 0.15); p.y = y;
+      q.setFromUnitVectors(zA, nrm);
+      s.set(sz, sz * 1.25, sz * 0.42);
+      drops.setMatrixAt(i, m4.compose(p, q, s));
+    }
+    group.add(drops);
+    scene.add(group);
+    return { group, mesh, mat, drops, seed };
+  }
+  const canA = makeCan(texA, '#ff5c95', 0.3);
+  const canB = makeCan(texB, '#6dff95', 2.1);
+
+  /* =====================================================================
+     8. PARTÍCULAS VOLUMÉTRICAS (bokeh por profundidad, flujo, convergencia)
+     ===================================================================== */
+  const PU = {
+    uTime: U.uTime, uBox: { value: new THREE.Vector3(14, 10, 26) }, uCam: { value: new THREE.Vector3() },
+    uFlow: { value: 0 }, uRise: { value: 0 }, uConverge: { value: 0 }, uCenter: { value: new THREE.Vector3(0, 0.25, -1.3) },
+    uRingR: { value: 1.2 }, uFocus: { value: 4 }, uAperture: { value: 0.3 }, uProj: { value: 1000 }, uPR: { value: dpr },
+    uColA: { value: new THREE.Color() }, uColB: { value: new THREE.Color() }, uAlpha: { value: 0.8 }, uSize: { value: 1 },
+  };
+  function makeParticles(n) {
+    const g = new THREE.BufferGeometry();
+    const pos = new Float32Array(n * 3), rnd = new Float32Array(n * 4), size = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      pos[i * 3] = rand() - 0.5; pos[i * 3 + 1] = rand() - 0.5; pos[i * 3 + 2] = rand() - 0.5;
+      for (let k = 0; k < 4; k++) rnd[i * 4 + k] = rand();
+      size[i] = 0.007 + Math.pow(rand(), 3) * 0.045;
+    }
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('aRnd', new THREE.BufferAttribute(rnd, 4));
+    g.setAttribute('aSize', new THREE.BufferAttribute(size, 1));
+    const mat = additive(new THREE.ShaderMaterial({
+      uniforms: PU,
+      vertexShader: /* glsl */`
+        attribute vec4 aRnd; attribute float aSize;
+        uniform float uTime; uniform float uFlow; uniform float uRise; uniform float uConverge; uniform float uRingR;
+        uniform float uFocus; uniform float uAperture; uniform float uProj; uniform float uPR; uniform float uAlpha; uniform float uSize;
+        uniform vec3 uBox; uniform vec3 uCam; uniform vec3 uCenter; uniform vec3 uColA; uniform vec3 uColB;
+        varying vec3 vCol; varying float vA; varying float vBok;
+        void main() {
+          vec3 p = position * uBox;
+          float t = uTime;
+          p += vec3(sin(t * 0.21 + aRnd.x * 6.2831), cos(t * 0.17 + aRnd.y * 6.2831), sin(t * 0.19 + aRnd.z * 6.2831)) * (0.12 + 0.3 * aRnd.w);
+          p.y += uRise * (0.5 + aRnd.y) + t * 0.035 * (aRnd.z - 0.25);
+          p.z += uFlow * (0.7 + 0.6 * aRnd.z);
+          vec3 rel = mod(p - uCam + 0.5 * uBox, uBox) - 0.5 * uBox;
+          vec3 wp = uCam + rel;
+          float ang = aRnd.x * 6.2831853 + t * (0.1 + 0.18 * aRnd.y);
+          float rad = uRingR * (0.84 + 0.34 * aRnd.z * aRnd.z);
+          vec3 ring = uCenter + vec3(cos(ang) * rad, sin(ang) * rad, (aRnd.w - 0.5) * 0.3);
+          float cv = smoothstep(0.0, 1.0, clamp(uConverge * 1.5 - aRnd.y * 0.5, 0.0, 1.0));
+          wp = mix(wp, ring, cv);
+          vec4 mv = viewMatrix * vec4(wp, 1.0);
+          float depth = max(-mv.z, 0.001);
+          float sizePx = aSize * uSize * uProj / depth;
+          float coc = uAperture * abs(depth - uFocus) / depth * uProj * 0.01;
+          float total = min(sizePx + coc, 150.0 * uPR);
+          float energy = (sizePx * sizePx + 2.0) / (total * total + 2.0);
+          vA = uAlpha * clamp(energy, 0.02, 1.0) * smoothstep(0.06, 0.5, depth) * (1.0 - smoothstep(14.0, 22.0, depth)) * (0.35 + 0.65 * aRnd.w) * (1.0 + cv * 0.8);
+          vBok = smoothstep(2.5 * uPR, 12.0 * uPR, coc);
+          vCol = mix(uColA, uColB, step(0.7, aRnd.z)) * 1.6;
+          gl_PointSize = max(total, 1.0);
+          gl_Position = projectionMatrix * mv;
+        }`,
+      fragmentShader: /* glsl */`
+        varying vec3 vCol; varying float vA; varying float vBok;
+        void main() {
+          vec2 d = gl_PointCoord * 2.0 - 1.0;
+          float r = length(d);
+          if (r > 1.0) discard;
+          float soft = exp(-r * r * 3.5);
+          float disc = (1.0 - smoothstep(0.82, 1.0, r)) * (0.7 + 0.3 * smoothstep(0.55, 0.95, r));
+          float s = mix(soft, disc, vBok) * vA;
+          gl_FragColor = vec4(vCol * s, s);
+        }`,
+    }));
+    const pts = new THREE.Points(g, mat);
+    pts.frustumCulled = false;
+    pts.renderOrder = 5;
+    scene.add(pts);
+    return pts;
+  }
+  const particles = makeParticles(Q.particles);
+
+  // Estelas de velocidad (motion blur de partículas en el viaje)
+  const SU = { uCam: PU.uCam, uBox: { value: new THREE.Vector3(12, 8, 26) }, uFlow: PU.uFlow, uStretch: { value: 0 }, uAlpha: { value: 0 }, uColor: { value: new THREE.Color() } };
+  const streaks = (() => {
+    const n = Q.streaks, g = new THREE.BufferGeometry();
+    const pos = new Float32Array(n * 6), rnd = new Float32Array(n * 8), end = new Float32Array(n * 2);
+    for (let i = 0; i < n; i++) {
+      const x = rand() - 0.5, y = rand() - 0.5, z = rand() - 0.5, r = [rand(), rand(), rand(), rand()];
+      for (let k = 0; k < 2; k++) {
+        pos.set([x, y, z], (i * 2 + k) * 3); rnd.set(r, (i * 2 + k) * 4); end[i * 2 + k] = k;
+      }
+    }
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('aRnd', new THREE.BufferAttribute(rnd, 4));
+    g.setAttribute('aEnd', new THREE.BufferAttribute(end, 1));
+    const mat = additive(new THREE.ShaderMaterial({
+      uniforms: SU,
+      vertexShader: /* glsl */`
+        attribute vec4 aRnd; attribute float aEnd;
+        uniform vec3 uCam; uniform vec3 uBox; uniform float uFlow; uniform float uStretch; uniform float uAlpha;
+        varying float vA;
+        void main() {
+          vec3 p = position * uBox;
+          p.z += uFlow * (0.7 + 0.6 * aRnd.z);
+          vec3 wp = uCam + mod(p - uCam + 0.5 * uBox, uBox) - 0.5 * uBox;
+          wp.xy += normalize(wp.xy - uCam.xy + 1e-3) * 0.6;
+          wp.z -= aEnd * uStretch * (0.4 + aRnd.x);
+          vec4 mv = viewMatrix * vec4(wp, 1.0);
+          float depth = -mv.z;
+          vA = uAlpha * (1.0 - aEnd) * smoothstep(0.2, 1.5, depth) * (1.0 - smoothstep(9.0, 13.0, depth)) * (0.3 + 0.7 * aRnd.w);
+          gl_Position = projectionMatrix * mv;
+        }`,
+      fragmentShader: /* glsl */`uniform vec3 uColor; varying float vA; void main() { gl_FragColor = vec4(uColor * vA, vA); }`,
+    }));
+    const lines = new THREE.LineSegments(g, mat);
+    lines.frustumCulled = false;
+    scene.add(lines);
+    return lines;
+  })();
+
+  // Gotas suspendidas (escena macro) — sprites con brillo y bokeh
+  const DU = { uTime: U.uTime, uFocus: PU.uFocus, uAperture: PU.uAperture, uProj: PU.uProj, uPR: PU.uPR, uShow: { value: 0 }, uTint: { value: new THREE.Color(0.75, 0.8, 0.9) } };
+  const floatDrops = (() => {
+    const n = Q.drops, g = new THREE.BufferGeometry();
+    const pos = new Float32Array(n * 3), rnd = new Float32Array(n * 4);
+    for (let i = 0; i < n; i++) {
+      pos.set([rr(-0.5, 0.5), rr(-0.45, 0.6), rr(0.37, 1.15)], i * 3);
+      rnd.set([rand(), rand(), rand(), 0.004 + Math.pow(rand(), 2.6) * 0.03], i * 4);
+    }
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('aRnd', new THREE.BufferAttribute(rnd, 4));
+    const mat = new THREE.ShaderMaterial({
+      uniforms: DU, transparent: true, depthWrite: false,
+      vertexShader: /* glsl */`
+        attribute vec4 aRnd;
+        uniform float uTime; uniform float uFocus; uniform float uAperture; uniform float uProj; uniform float uPR; uniform float uShow;
+        varying float vA; varying float vBok;
+        void main() {
+          vec3 p = position + vec3(sin(uTime * 0.3 + aRnd.x * 6.28) * 0.02, sin(uTime * 0.21 + aRnd.y * 6.28) * 0.025 - uTime * 0.004 * aRnd.z, 0.0);
+          vec4 mv = modelViewMatrix * vec4(p, 1.0);
+          float depth = max(-mv.z, 0.001);
+          float sizePx = aRnd.w * uProj / depth;
+          float coc = uAperture * abs(depth - uFocus) / depth * uProj * 0.01;
+          float total = min(sizePx + coc, 220.0 * uPR);
+          vA = uShow * clamp((sizePx * sizePx + 4.0) / (total * total + 4.0), 0.06, 1.0) * smoothstep(0.03, 0.12, depth);
+          vBok = smoothstep(3.0 * uPR, 16.0 * uPR, coc);
+          gl_PointSize = max(total, 1.0);
+          gl_Position = projectionMatrix * mv;
+        }`,
+      fragmentShader: /* glsl */`
+        uniform vec3 uTint; varying float vA; varying float vBok;
+        void main() {
+          vec2 d = gl_PointCoord * 2.0 - 1.0; d.y = -d.y;
+          float r2 = dot(d, d);
+          if (r2 > 1.0) discard;
+          float r = sqrt(r2);
+          vec3 n = vec3(d, sqrt(1.0 - r2));
+          float spec = pow(max(dot(reflect(-normalize(vec3(-0.45, 0.6, 0.65)), n), vec3(0.0, 0.0, 1.0)), 0.0), 40.0);
+          float caus = pow(max(dot(n, normalize(vec3(0.3, -0.55, 0.78))), 0.0), 18.0) * 0.35;
+          float rim = smoothstep(0.6, 1.0, r) * (1.0 - smoothstep(0.93, 1.0, r));
+          vec3 col = uTint * (0.12 + 0.55 * rim) + vec3(spec * 1.8 + caus);
+          float a = 0.1 + 0.55 * rim + spec;
+          float bokA = 0.2 * (1.0 - smoothstep(0.85, 1.0, r)) + 0.14 * smoothstep(0.6, 0.95, r);
+          col = mix(col, uTint * 0.8 + 0.35, vBok);
+          gl_FragColor = vec4(col, mix(a, bokA, vBok) * vA);
+        }`,
+    });
+    const pts = new THREE.Points(g, mat);
+    pts.frustumCulled = false;
+    pts.renderOrder = 6;
+    scene.add(pts);
+    return pts;
+  })();
+
+  // Niebla volumétrica simulada — tarjetas billboard envolviendo la cámara
+  const FU = { uTime: U.uTime, uCam: PU.uCam, uFlow: PU.uFlow, uRise: PU.uRise, uBox: { value: new THREE.Vector3(18, 12, 26) }, tNoise: { value: fogTex }, uColor: { value: new THREE.Color() }, uAmount: { value: 0.3 } };
+  const fogCards = (() => {
+    const n = Q.fog, base = new THREE.PlaneGeometry(1, 1);
+    const g = new THREE.InstancedBufferGeometry();
+    g.index = base.index; g.setAttribute('position', base.attributes.position); g.setAttribute('uv', base.attributes.uv);
+    const cen = new Float32Array(n * 3), par = new Float32Array(n * 4);
+    for (let i = 0; i < n; i++) { cen.set([rand() - 0.5, rand() - 0.5, rand() - 0.5], i * 3); par.set([rr(4, 9), rand() * TAU, rand(), rr(0.5, 1)], i * 4); }
+    g.setAttribute('aCenter', new THREE.InstancedBufferAttribute(cen, 3));
+    g.setAttribute('aParam', new THREE.InstancedBufferAttribute(par, 4));
+    g.instanceCount = n;
+    const mat = additive(new THREE.ShaderMaterial({
+      uniforms: FU,
+      vertexShader: /* glsl */`
+        attribute vec3 aCenter; attribute vec4 aParam;
+        uniform vec3 uCam; uniform vec3 uBox; uniform float uFlow; uniform float uRise; uniform float uTime;
+        varying vec2 vUv; varying float vA; varying float vSeed;
+        void main() {
+          vec3 p = aCenter * uBox;
+          p.z += uFlow * 0.8; p.y += uRise * 0.5; p.x += sin(uTime * 0.05 + aParam.z * 6.0) * 0.6;
+          vec3 wp = uCam + mod(p - uCam + 0.5 * uBox, uBox) - 0.5 * uBox;
+          vec4 mv = viewMatrix * vec4(wp, 1.0);
+          float rot = aParam.y + uTime * 0.03 * (aParam.z - 0.5);
+          vec2 q = position.xy * aParam.x;
+          mv.xy += vec2(cos(rot) * q.x - sin(rot) * q.y, sin(rot) * q.x + cos(rot) * q.y);
+          float depth = -mv.z;
+          vA = aParam.w * smoothstep(0.8, 3.0, depth) * (1.0 - smoothstep(4.5, 6.5, length(wp - uCam)));
+          vUv = uv; vSeed = aParam.z;
+          gl_Position = projectionMatrix * mv;
+        }`,
+      fragmentShader: /* glsl */`
+        uniform sampler2D tNoise; uniform vec3 uColor; uniform float uAmount; uniform float uTime;
+        varying vec2 vUv; varying float vA; varying float vSeed;
+        void main() {
+          float n = texture2D(tNoise, vUv).r * (0.7 + 0.3 * sin(uTime * 0.2 + vSeed * 9.0));
+          float a = n * vA * uAmount;
+          gl_FragColor = vec4(uColor * a, a);
+        }`,
+    }));
+    const mesh = new THREE.Mesh(g, mat);
+    mesh.frustumCulled = false;
+    mesh.renderOrder = 4;
+    scene.add(mesh);
+    return mesh;
+  })();
+
+  C.setProgress(0.74, 'Partículas y atmósfera');
+  await yieldFrame();
+
+  /* =====================================================================
+     9. ESCENARIOS — conjuntos instanciados
+     ===================================================================== */
+  const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _p = new THREE.Vector3(), _s = new THREE.Vector3();
+  const camPos = new THREE.Vector3(), target = new THREE.Vector3();
+  function put(mesh, i, x, y, z, rx, ry, rz, sx, sy, sz) {
+    // Evita que los objetos atraviesen el objetivo de cámara de forma brusca
+    const dc = Math.hypot(x - camPos.x, y - camPos.y, z - camPos.z);
+    const k = smooth(0.25, 0.9, dc);
+    _p.set(x, y, z); _e.set(rx, ry, rz); _q.setFromEuler(_e); _s.set(sx * k, sy * k, sz * k);
+    mesh.setMatrixAt(i, _m.compose(_p, _q, _s));
+  }
+  function inst(geo, mat, n, gen, colors) {
+    const mesh = new THREE.InstancedMesh(geo, mat, n);
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    mesh.frustumCulled = false;
+    const data = [];
+    const col = new THREE.Color();
+    for (let i = 0; i < n; i++) {
+      data.push(gen(i));
+      if (colors) mesh.setColorAt(i, col.set(colors[i % colors.length]));
+    }
+    scene.add(mesh);
+    return { mesh, data };
+  }
+  const easeOutBack = (t) => { const c1 = 1.4, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2); };
+  const appear = (amt, stg) => { const k = clamp((amt - stg * 0.45) / 0.55, 0, 1); return k <= 0 ? 0 : easeOutBack(k); };
+
+  // ── Universo rosa: esferas brillantes + cristales iridiscentes
+  const glossMat = new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.16, metalness: 0.05, clearcoat: 1, clearcoatRoughness: 0.05, sheen: 1, sheenColor: new THREE.Color('#ff7aa8'), sheenRoughness: 0.4, envMapIntensity: 1.3 });
+  const crystalMat = new THREE.MeshPhysicalMaterial({ color: '#ffc4d8', metalness: 0.1, roughness: 0.04, transparent: true, opacity: 0.58, iridescence: 1, iridescenceIOR: 1.6, flatShading: true, envMapIntensity: 2.2 });
+  const sphGeo = new THREE.SphereGeometry(1, Q.mobile ? 20 : 32, Q.mobile ? 14 : 22);
+  const octGeo = new THREE.OctahedronGeometry(1, 0);
+  const orbGen = (rMin, rMax, yMin, yMax, sMin, sMax) => () => ({
+    R: rr(rMin, rMax) * (rand() < 0.12 ? 1.6 : 1), y: rr(yMin, yMax), a: rand() * TAU, w: rr(0.06, 0.28) * (rand() < 0.5 ? -1 : 1),
+    bob: rr(0.04, 0.22), sp: rr(0.4, 1.2), s: sMin + Math.pow(rand(), 2) * (sMax - sMin), stg: rand(), rx: rand() * TAU, rz: rand() * TAU,
+  });
+  const pinkS = inst(sphGeo, glossMat, Q.pink[0], orbGen(0.9, 3.4, -1.4, 1.6, 0.04, 0.3), ['#ff4f8b', '#ff8fb4', '#ffd6e4', '#d1124f', '#ffffff', '#ff2f73']);
+  const pinkC = inst(octGeo, crystalMat, Q.pink[1], orbGen(0.8, 3.0, -1.2, 1.4, 0.06, 0.2));
+
+  // ── Mundo de hielo: corredor de cristales hexagonales
+  const shardGeo = new THREE.LatheGeometry([[0, -1], [0.16, -0.72], [0.2, -0.6], [0.2, 0.55], [0.16, 0.72], [0, 1]].map((p) => new THREE.Vector2(p[0], p[1])), 6);
+  const iceMat = new THREE.MeshPhysicalMaterial({ color: '#d6efff', metalness: 0, roughness: 0.03, transparent: true, opacity: 0.5, flatShading: true, iridescence: 0.6, envMapIntensity: 2.6 });
+  const ice = inst(shardGeo, iceMat, Q.ice, () => {
+    const a = rand() * TAU, d = 0.95 + Math.pow(rand(), 0.8) * 5.2;
+    return { x: Math.cos(a) * d, y: Math.sin(a) * d * 0.7, z: rr(-36, 5), rx: rand() * TAU, ry: rand() * TAU, rz: rand() * TAU, s: rr(0.15, 0.7) * (d > 4 ? 1.8 : 1), stg: rand(), w: rr(-0.25, 0.25) };
+  });
+
+  // ── Universo verde: esferas y anillos en ascenso
+  const ringGeo = new THREE.TorusGeometry(1, 0.07, 12, 56);
+  const greenRingMat = new THREE.MeshStandardMaterial({ color: '#a8e8b4', metalness: 1, roughness: 0.18, envMapIntensity: 1.4 });
+  const greenS = inst(sphGeo, glossMat.clone(), Q.green[0], orbGen(0.8, 3.6, -2.5, 4.5, 0.04, 0.26), ['#2fbf5a', '#7be495', '#c8f5b0', '#ffffff', '#0f7a35', '#57e07a']);
+  greenS.mesh.material.sheenColor = new THREE.Color('#7dffa0');
+  const greenR = inst(ringGeo, greenRingMat, Q.green[1], orbGen(1.0, 3.2, -2.5, 4.5, 0.12, 0.34));
+
+  // ── Mundo metálico: suelo reflectante, haces volumétricos, objetos suspendidos
+  const chromeMat = new THREE.MeshStandardMaterial({ color: '#e6e8ee', metalness: 1, roughness: 0.07, envMapIntensity: 1.5 });
+  const icoGeo = new THREE.IcosahedronGeometry(1, 0);
+  const stageGen = () => {
+    let x, z;
+    do { x = rr(-4.6, 4.6); z = rr(-4, 2.4); } while (Math.abs(x) < 1.4 && z > -1.2);
+    return { x, z, y: rr(-0.3, 2.4), rx: rand() * TAU, ry: rand() * TAU, s: rr(0.05, 0.22), stg: rand(), sp: rr(0.3, 0.9), bob: rr(0.05, 0.18) };
+  };
+  const stageI = inst(icoGeo, chromeMat, Q.shapes, stageGen);
+  const stageB = inst(sphGeo, chromeMat, Math.ceil(Q.shapes / 2), stageGen);
+
+  const FLOOR_Y = -0.75;
+  const floorUniforms = {
+    color: { value: new THREE.Color(0.016, 0.017, 0.02) }, tDiffuse: { value: null }, textureMatrix: { value: null },
+    uOpacity: { value: 0 }, uRefl: { value: 0.62 }, uPoolA: { value: new THREE.Vector3() }, uPoolB: { value: new THREE.Vector3() },
+    uPoolColor: { value: new THREE.Color() }, uShA: { value: new THREE.Vector3() }, uShB: { value: new THREE.Vector3() },
+  };
+  const floorShader = {
+    uniforms: floorUniforms,
+    vertexShader: /* glsl */`
+      uniform mat4 textureMatrix; varying vec4 vUv; varying vec3 vW;
+      void main() { vUv = textureMatrix * vec4(position, 1.0); vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
+    fragmentShader: /* glsl */`
+      uniform vec3 color; uniform sampler2D tDiffuse; uniform float uOpacity; uniform float uRefl;
+      uniform vec3 uPoolA; uniform vec3 uPoolB; uniform vec3 uPoolColor; uniform vec3 uShA; uniform vec3 uShB;
+      varying vec4 vUv; varying vec3 vW;
+      ${NOISE}
+      void main() {
+        float br = vnoise(vec2(vW.x * 38.0, vW.z * 1.6));
+        vec3 base = color * (0.8 + 0.4 * br);
+        vec3 refl = vec3(0.0);
+        #ifdef HAS_REFL
+          vec2 uv = vUv.xy / vUv.w;
+          float b = 0.0025 + 0.01 * smoothstep(0.0, 4.0, length(vW.xz));
+          refl = texture2D(tDiffuse, uv).rgb * 0.36
+            + (texture2D(tDiffuse, uv + vec2(b, 0.0)).rgb + texture2D(tDiffuse, uv - vec2(b, 0.0)).rgb
+            +  texture2D(tDiffuse, uv + vec2(0.0, b)).rgb + texture2D(tDiffuse, uv - vec2(0.0, b)).rgb) * 0.16;
+        #endif
+        float dA = length(vW.xz - uPoolA.xy), dB = length(vW.xz - uPoolB.xy);
+        vec3 pool = uPoolColor * (exp(-dA * dA * 2.4) * uPoolA.z + exp(-dB * dB * 2.4) * uPoolB.z);
+        float sh = 1.0 - 0.8 * (exp(-pow(length(vW.xz - uShA.xy) / 0.38, 2.0)) * uShA.z + exp(-pow(length(vW.xz - uShB.xy) / 0.38, 2.0)) * uShB.z);
+        vec3 col = (base + pool) * sh + refl * uRefl * mix(1.0, sh, 0.6) * (0.9 + 0.2 * br);
+        float edge = 1.0 - smoothstep(3.5, 13.0, length(vW.xz));
+        gl_FragColor = vec4(col, uOpacity * edge);
+      }`,
+  };
+  const floorGeo = new THREE.PlaneGeometry(40, 40);
+  let floor, reflector = null;
+  if (Q.reflector) {
+    reflector = new Reflector(floorGeo, {
+      textureWidth: Math.round(vw() * dpr * 0.5), textureHeight: Math.round(vh() * dpr * 0.5),
+      clipBias: 0.003, multisample: 0, shader: floorShader,
+    });
+    reflector.material.defines = { HAS_REFL: '' };
+    reflector.material.uniforms.color.value.setRGB(0.016, 0.017, 0.02);
+    reflector.material.needsUpdate = true;
+    floor = reflector;
+  } else {
+    floor = new THREE.Mesh(floorGeo, new THREE.ShaderMaterial({ uniforms: THREE.UniformsUtils.clone(floorUniforms), vertexShader: floorShader.vertexShader, fragmentShader: floorShader.fragmentShader }));
+    floor.material.uniforms.textureMatrix.value = new THREE.Matrix4();
+  }
+  floor.material.transparent = true;
+  floor.material.depthWrite = false;
+  const FLU = floor.material.uniforms;
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.y = FLOOR_Y;
+  floor.renderOrder = -10;
+  scene.add(floor);
+
+  const coneMat = additive(new THREE.ShaderMaterial({
+    uniforms: { uI: { value: 0 }, uColor: { value: new THREE.Color() }, uTime: U.uTime },
+    side: THREE.DoubleSide,
+    vertexShader: /* glsl */`
+      varying vec3 vN; varying vec3 vV; varying float vH; varying vec3 vW;
+      void main() {
+        vH = (position.y + 2.1) / 4.2;
+        vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz;
+        vN = normalize(mat3(modelMatrix) * normal); vV = normalize(cameraPosition - w.xyz);
+        gl_Position = projectionMatrix * viewMatrix * w;
+      }`,
+    fragmentShader: /* glsl */`
+      uniform float uI; uniform vec3 uColor; uniform float uTime;
+      varying vec3 vN; varying vec3 vV; varying float vH; varying vec3 vW;
+      ${NOISE}
+      void main() {
+        float f = pow(abs(dot(normalize(vN), normalize(vV))), 2.2);
+        float n = fbm(vec2(atan(vW.x, vW.z) * 2.0 + uTime * 0.05, vW.y * 1.4 - uTime * 0.25));
+        float a = f * (0.25 + 0.75 * vH) * smoothstep(0.0, 0.14, vH) * (0.55 + 0.6 * n) * uI * 0.22;
+        gl_FragColor = vec4(uColor * a, a);
+      }`,
+  }));
+  const coneGeo = new THREE.ConeGeometry(0.95, 4.2, 48, 1, true);
+  const coneA = new THREE.Mesh(coneGeo, coneMat), coneB = new THREE.Mesh(coneGeo, coneMat);
+  [coneA, coneB].forEach((c) => { c.position.y = FLOOR_Y + 2.1; c.renderOrder = 8; scene.add(c); });
+
+  // ── Viaje de cámara: anillos de luz y fragmentos en un túnel infinito
+  const tRingGeo = new THREE.TorusGeometry(1.75, 0.016, 6, 128);
+  const tRingMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const tRings = inst(tRingGeo, tRingMat, Q.rings, () => ({ ox: rr(-0.4, 0.4), oy: rr(-0.3, 0.3), s: rr(0.85, 1.25), tilt: rr(-0.12, 0.12) }));
+  tRings.data.forEach((d, i) => tRings.mesh.setColorAt(i, new THREE.Color(...(i % 3 === 0 ? [1.8, 1.8, 1.9] : [2.6, 0.12, 0.22]))));
+  const darkChrome = new THREE.MeshStandardMaterial({ color: '#25262c', metalness: 1, roughness: 0.22, envMapIntensity: 1.6 });
+  const tShards = inst(shardGeo, darkChrome, Q.shards, () => { const a = rand() * TAU, d = rr(1.3, 5); return { x: Math.cos(a) * d, y: Math.sin(a) * d, z0: rand() * 120, rx: rand() * TAU, ry: rand() * TAU, s: rr(0.12, 0.45), w: rr(-1, 1) }; });
+
+  C.setProgress(0.78, 'Escenarios listos');
+  await yieldFrame();
+
+  /* =====================================================================
+     10. LUCES — rig relativo a cámara (clave, contraluces, relleno, barrido)
+     ===================================================================== */
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x080808, 0.25);
+  const key = new THREE.DirectionalLight(0xffffff, 2);
+  const rimL = new THREE.DirectionalLight(0xff2030, 4);
+  const rimR = new THREE.DirectionalLight(0xff2030, 4);
+  const fill = new THREE.DirectionalLight(0x222222, 0.5);
+  const sweep = new THREE.PointLight(0xffffff, 0, 3, 2);
+  scene.add(hemi, key, key.target, rimL, rimL.target, rimR, rimR.target, fill, fill.target, sweep);
+
+  /* =====================================================================
+     11. MAPAS DE ENTORNO (PMREM) — cada fondo + "lightformers" de estudio
+     ===================================================================== */
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const envSphere = new THREE.SphereGeometry(40, 48, 24);
+  const envPlane = new THREE.PlaneGeometry(1, 1);
+  const envTexSrc = srcTex.map((t, i) => (hybrid ? new THREE.CanvasTexture(C.placeholder(i)) : t));
+  envTexSrc.forEach((t) => { t.colorSpace = THREE.SRGBColorSpace; });
+  const envCache = new Map(), envOrder = [];
+  function makeEnv(texIdx) {
+    const look = C.LOOKS[P.indexOf(texIdx)];
+    const es = new THREE.Scene();
+    const mats = [];
+    const sph = new THREE.Mesh(envSphere, new THREE.MeshBasicMaterial({ map: envTexSrc[texIdx], side: THREE.BackSide, toneMapped: false }));
+    mats.push(sph.material); es.add(sph);
+    const lf = (w, h, x, y, z, color, k) => {
+      const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(k), side: THREE.DoubleSide, toneMapped: false });
+      mats.push(mat);
+      const m = new THREE.Mesh(envPlane, mat); m.scale.set(w, h, 1); m.position.set(x, y, z); m.lookAt(0, 0, 0); es.add(m);
+    };
+    lf(16, 5, 0, 14, 3, look.key, 1.2 + look.keyI * 0.4);
+    lf(2.4, 16, -13, 1, -5, look.rimL, 2.5 + look.rimI * 0.35);
+    lf(2.4, 16, 13, 1, -5, look.rimR, 2.5 + look.rimI * 0.35);
+    lf(2.0, 13, -6, 2, 13, '#ffffff', 1.1);          // tiras verticales de estudio:
+    lf(1.0, 8, 7.5, -1.5, 12, look.rimR, 1.1);       // reflejos verticales en el cilindro
+    lf(18, 3, 0, -10, 6, look.fill, 1.0);
+    const target_ = pmrem.fromScene(es, 0, 0.1, 100);
+    mats.forEach((m) => m.dispose());
+    return target_;
+  }
+  function getEnv(idx) {
+    let t = envCache.get(idx);
+    if (!t) {
+      t = makeEnv(idx);
+      envCache.set(idx, t);
+      envOrder.push(idx);
+      while (envOrder.length > Q.envLRU) { const old = envOrder.shift(); if (old !== idx) { envCache.get(old).dispose(); envCache.delete(old); } }
+    } else {
+      envOrder.splice(envOrder.indexOf(idx), 1); envOrder.push(idx);
+    }
+    return t.texture;
+  }
+  const envPreload = Q.mobile ? [0, 1] : [0, 1, 2, 3, 4, 5, 6, 7];
+  for (let i = 0; i < envPreload.length; i++) {
+    getEnv(envPreload[i]);
+    C.setProgress(0.8 + (0.12 * (i + 1)) / envPreload.length, `Iluminación ${i + 1}/${envPreload.length}`);
+    await yieldFrame();
+  }
+  let curEnv = -1;
+  const envMats = [
+    [canA.mat, 1.25], [canB.mat, 1.25], [dropMat, 2.4], [glossMat, 1.3], [greenS.mesh.material, 1.3], [crystalMat, 2.2],
+    [iceMat, 2.6], [greenRingMat, 1.4], [chromeMat, 1.5], [darkChrome, 1.6],
+  ];
+
+  /* =====================================================================
+     12. LOOK — interpolación de iluminación/color entre mundos
+     ===================================================================== */
+  const COLOR_KEYS = ['fog', 'pA', 'pB', 'key', 'rimL', 'rimR', 'fill', 'hazeCol', 'cone'];
+  const NUM_KEYS = ['fogD', 'pAlpha', 'keyI', 'rimI', 'fillI', 'exp', 'bloom', 'gain', 'haze', 'fogAmt', 'env'];
+  const LK = C.LOOKS.map((l) => {
+    const o = {};
+    COLOR_KEYS.forEach((k) => { o[k] = new THREE.Color(l[k]); });
+    NUM_KEYS.forEach((k) => { o[k] = l[k]; });
+    return o;
+  });
+  const look = {};
+  COLOR_KEYS.forEach((k) => { look[k] = new THREE.Color(); });
+  let trans = 0;
+  function applyLook() {
+    const wp = clamp(S.world.pos, 0, P.length - 1);
+    const i0 = Math.floor(wp), i1 = Math.min(i0 + 1, P.length - 1), f = wp - i0, fs = f * f * (3 - 2 * f);
+    const a = LK[i0], b = LK[i1];
+    COLOR_KEYS.forEach((k) => look[k].copy(a[k]).lerp(b[k], fs));
+    NUM_KEYS.forEach((k) => { look[k] = a[k] + (b[k] - a[k]) * fs; });
+    U.tA.value = srcTex[P[i0]]; U.tB.value = srcTex[P[i1]]; U.uMix.value = P[i0] === P[i1] ? 0 : f;
+    trans = P[i0] !== P[i1] ? Math.sin(Math.PI * f) : 0;
+    const envIdx = P[f < 0.5 ? i0 : i1];
+    if (envIdx !== curEnv) { scene.environment = getEnv(envIdx); curEnv = envIdx; }
+  }
+
+  /* =====================================================================
+     13. INTERACCIÓN — parallax por puntero (desktop) + resize
+     ===================================================================== */
+  const ptr = { x: 0, y: 0, tx: 0, ty: 0 };
+  if (!Q.mobile && !C.reduced) {
+    window.addEventListener('pointermove', (e) => {
+      ptr.tx = (e.clientX / window.innerWidth) * 2 - 1;
+      ptr.ty = (e.clientY / window.innerHeight) * 2 - 1;
+    }, { passive: true });
+  }
+
+  function resize() {
+    const w = vw(), h = vh();
+    renderer.setPixelRatio(dpr);
+    renderer.setSize(w, h, false);
+    composer.setPixelRatio(dpr);
+    composer.setSize(w, h);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    finalPass.uniforms.uRes.value.set(w * dpr, h * dpr);
+    hp.uniforms.uTexel.value.set(1 / (w * dpr), 1 / (h * dpr));
+    bgMat.uniforms.uAspect.value = w / h;
+    PU.uPR.value = dpr;
+    if (reflector) reflector.getRenderTarget().setSize(Math.round(w * dpr * 0.5), Math.round(h * dpr * 0.5));
+  }
+  let rsT = 0, lastW = vw(), lastH = vh();
+  window.addEventListener('resize', () => {
+    clearTimeout(rsT);
+    rsT = setTimeout(() => {
+      const w = vw(), h = vh();
+      if (w === lastW && Math.abs(h - lastH) < 2) return;
+      lastW = w; lastH = h; resize();
+    }, 120);
+  });
+  resize();
+
+  /* =====================================================================
+     14. FRAME — aplica el estado de la línea de tiempo a la escena
+     ===================================================================== */
+  const fwd = new THREE.Vector3(), right = new THREE.Vector3(), upv = new THREE.Vector3(), UP = new THREE.Vector3(0, 1, 0);
+  const prevPos = new THREE.Vector3(), prevFwd = new THREE.Vector3(0, 0, -1);
+  let prevFlow = 0, blurS = 0, flowSpeed = 0, firstFrame = true, yawU = 0, yawPrev = 0;
+  const hand = C.reduced ? 0 : 1;
+  const D = (C.debug = { frames: 0, fps: 0, dpr, objs: { particles, floatDrops, streaks, fogCards, backdrop, floor }, renderer });
+
+  function updateCamera(t, dt) {
+    const c = S.cam;
+    const aspect = vw() / vh();
+    const pk = aspect < 1 ? 1 + Math.min((1 / aspect - 1) * 0.55, 1.1) : 1;
+    ptr.x += (ptr.tx - ptr.x) * Math.min(1, dt * 2.5);
+    ptr.y += (ptr.ty - ptr.y) * Math.min(1, dt * 2.5);
+    const th = c.theta + ptr.x * 0.06, ph = c.phi - ptr.y * 0.035;
+    const r = c.r * (1 + (pk - 1) * smooth(0.6, 2.6, c.r));
+    target.set(c.tx, c.ty, c.tz);
+    camPos.set(target.x + r * Math.sin(th) * Math.cos(ph), target.y + r * Math.sin(ph), target.z + r * Math.cos(th) * Math.cos(ph));
+    const hh = 0.008 * Math.min(r, 6) * hand;
+    camPos.x += (Math.sin(t * 0.63) + Math.sin(t * 1.37) * 0.5) * hh;
+    camPos.y += (Math.sin(t * 0.81 + 1.0) + Math.sin(t * 1.73) * 0.4) * hh;
+    camera.position.copy(camPos);
+    camera.lookAt(target);
+    camera.rotateZ(c.roll + Math.sin(t * 0.5) * 0.003 * hand);
+    camera.fov = c.fov * (aspect < 1 ? 1 + (pk - 1) * 0.15 : 1);
+    camera.filmOffset = aspect > 1.15 ? c.shift : 0;
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld();
+    camera.getWorldDirection(fwd);
+    right.crossVectors(fwd, UP).normalize();
+    upv.crossVectors(right, fwd);
+  }
+
+  function updateCan(can, st, t) {
+    const g = can.group;
+    g.visible = st.show > 0.002;
+    if (!g.visible) return;
+    const bob = Math.sin(t * 0.9 + can.seed) * 0.015 * (1 - st.morph);
+    g.position.set(st.x, st.y + bob, st.z);
+    g.rotation.set(st.rx, st.ry + t * 0.12, st.rz);
+    g.scale.setScalar(Math.max(0.0001, st.s * st.show));
+    can.mat.userData.u.uReveal.value = st.reveal;
+    can.mat.userData.u.uMorph.value = st.morph;
+    can.drops.visible = st.morph < 0.02;
+  }
+
+  function updateSets(t) {
+    const st = S.sets;
+    // Rosa
+    const pk = st.pink;
+    pinkS.mesh.visible = pinkC.mesh.visible = pk > 0.001;
+    if (pk > 0.001) {
+      for (const [set, crystal] of [[pinkS, false], [pinkC, true]]) {
+        set.data.forEach((d, i) => {
+          const a = d.a + d.w * t + st.pinkOrbit * (0.5 + Math.abs(d.w) * 2) * Math.sign(d.w);
+          const s = d.s * appear(pk, d.stg);
+          put(set.mesh, i, Math.cos(a) * d.R, d.y + Math.sin(t * d.sp + d.a) * d.bob, Math.sin(a) * d.R,
+            d.rx + t * 0.4, t * d.sp, d.rz, s, crystal ? s * 2.4 : s, s);
+        });
+        set.mesh.instanceMatrix.needsUpdate = true;
+      }
+    }
+    // Hielo
+    ice.mesh.visible = st.ice > 0.001;
+    if (ice.mesh.visible) {
+      ice.data.forEach((d, i) => {
+        const s = d.s * appear(st.ice, d.stg);
+        put(ice.mesh, i, d.x, d.y + Math.sin(t * 0.3 + d.rx) * 0.05, d.z, d.rx + t * d.w * 0.3, d.ry + t * d.w, d.rz, s, s, s);
+      });
+      ice.mesh.instanceMatrix.needsUpdate = true;
+    }
+    // Verde (ascenso continuo)
+    const gk = st.green;
+    greenS.mesh.visible = greenR.mesh.visible = gk > 0.001;
+    if (gk > 0.001) {
+      const cy = S.B.y;
+      for (const [set, ring] of [[greenS, false], [greenR, true]]) {
+        set.data.forEach((d, i) => {
+          const span = 7;
+          let y = ((d.y + 2.5 + t * 0.12 * d.sp + st.greenRise * (0.6 + d.sp * 0.5)) % span + span) % span;
+          const edge = smooth(0, 0.8, y) * smooth(span, span - 0.8, y);
+          y += cy - 2.5;
+          const a = d.a + d.w * t * 0.6;
+          const s = d.s * appear(gk, d.stg) * edge;
+          put(set.mesh, i, Math.cos(a) * d.R, y, Math.sin(a) * d.R, ring ? Math.PI / 2 + Math.sin(t * 0.4 + d.a) * 0.5 : d.rx, t * 0.3 * d.sp, d.rz, s, s, s);
+        });
+        set.mesh.instanceMatrix.needsUpdate = true;
+      }
+    }
+    // Escenario metálico
+    const sk = st.stage;
+    stageI.mesh.visible = stageB.mesh.visible = sk > 0.001;
+    if (sk > 0.001) {
+      for (const set of [stageI, stageB]) {
+        set.data.forEach((d, i) => {
+          const s = d.s * appear(sk, d.stg);
+          put(set.mesh, i, d.x, d.y + Math.sin(t * d.sp + d.rx) * d.bob, d.z, d.rx + t * 0.2 * d.sp, d.ry + t * 0.3 * d.sp, 0, s, s, s);
+        });
+        set.mesh.instanceMatrix.needsUpdate = true;
+      }
+    }
+    // Túnel del viaje
+    const jk = st.journey;
+    tRings.mesh.visible = tShards.mesh.visible = jk > 0.001;
+    if (jk > 0.001) {
+      const flow = S.p.flow, Lr = 120, n = tRings.data.length, sp = Lr / n;
+      tRings.data.forEach((d, i) => {
+        const z = -((((i * sp - flow) % Lr) + Lr) % Lr);
+        const s = d.s * jk * smooth(-Lr, -Lr + 25, z);
+        put(tRings.mesh, i, d.ox + Math.sin(i * 0.7) * 0.3, d.oy + Math.cos(i * 0.5) * 0.25, camPos.z + z, d.tilt, d.tilt * 0.5, i * 0.45 + flow * 0.01, s, s, s);
+      });
+      tRings.mesh.instanceMatrix.needsUpdate = true;
+      tShards.data.forEach((d, i) => {
+        const z = -((((d.z0 - flow * 1.1) % Lr) + Lr) % Lr);
+        const s = d.s * jk * smooth(-Lr, -Lr + 25, z);
+        put(tShards.mesh, i, d.x, d.y, camPos.z + z, d.rx + t * d.w, d.ry + t * d.w * 0.7, 0, s, s * 1.6, s);
+      });
+      tShards.mesh.instanceMatrix.needsUpdate = true;
+    }
+    // Suelo + haces de luz + sombras de contacto
+    floor.visible = st.floor > 0.001;
+    FLU.uOpacity.value = st.floor;
+    FLU.uPoolColor.value.copy(look.cone).multiplyScalar(0.5);
+    const A = S.A, B = S.B;
+    const shadowK = (o) => o.show * clamp(1 - (o.y + 0.14) * 2.2, 0, 1) * (1 - o.morph);
+    FLU.uPoolA.value.set(A.x, A.z, st.cones * A.show);
+    FLU.uPoolB.value.set(B.x, B.z, st.cones * B.show);
+    FLU.uShA.value.set(A.x, A.z, shadowK(A));
+    FLU.uShB.value.set(B.x, B.z, shadowK(B));
+    const ci = st.cones;
+    coneA.visible = coneB.visible = ci > 0.001;
+    coneMat.uniforms.uI.value = ci;
+    coneMat.uniforms.uColor.value.copy(look.cone);
+    coneA.position.x = A.x; coneA.position.z = A.z;
+    coneB.position.x = B.x; coneB.position.z = B.z;
+  }
+
+  function updateLights(t) {
+    const kI = S.light.key;
+    key.color.copy(look.key); key.intensity = look.keyI * kI;
+    key.position.copy(target).addScaledVector(fwd, -3).addScaledVector(right, 2.2).addScaledVector(UP, 3.2);
+    key.target.position.copy(target);
+    rimL.color.copy(look.rimL); rimL.intensity = look.rimI * (0.55 + 0.45 * kI);
+    rimL.position.copy(target).addScaledVector(fwd, 3.5).addScaledVector(right, -2.6).addScaledVector(UP, 1.2);
+    rimL.target.position.copy(target);
+    rimR.color.copy(look.rimR); rimR.intensity = look.rimI * (0.55 + 0.45 * kI);
+    rimR.position.copy(target).addScaledVector(fwd, 3.5).addScaledVector(right, 2.6).addScaledVector(UP, 1.2);
+    rimR.target.position.copy(target);
+    fill.color.copy(look.fill); fill.intensity = look.fillI * 1.4;
+    fill.position.copy(target).addScaledVector(fwd, -2).addScaledVector(right, -1.5).addScaledVector(UP, -1.5);
+    fill.target.position.copy(target);
+    hemi.intensity = 0.12 + 0.18 * kI;
+    // Luz de barrido para la macro: reflejo que recorre la superficie
+    sweep.intensity = S.light.sweepI * 0.9;
+    sweep.position.set(S.A.x + (S.light.sweep * 2.4 - 1.2), S.A.y + 0.35, S.A.z + 1.1);
+    // Intensidad de entorno por mundo
+    for (const [m, base] of envMats) m.envMapIntensity = base * look.env;
+  }
+
+  function frame(time, deltaMs) {
+    if (!running) return;
+    const t = time;
+    const dt = Math.min((deltaMs || 16) / 1000, 0.1);
+    U.uTime.value = t;
+
+    applyLook();
+    updateCamera(t, dt);
+
+    // Velocidad de cámara y flujo → motion blur simulado
+    const camVel = firstFrame ? 0 : camPos.distanceTo(prevPos) / dt;
+    const angVel = firstFrame ? 0 : Math.acos(clamp(fwd.dot(prevFwd), -1, 1)) / dt;
+    flowSpeed = firstFrame ? 0 : (S.p.flow - prevFlow) / dt;
+    prevPos.copy(camPos); prevFwd.copy(fwd); prevFlow = S.p.flow; firstFrame = false;
+    const autoBlur = clamp(camVel * 0.006 + angVel * 0.025 + Math.abs(flowSpeed) * 0.0035, 0, 0.45) * hand;
+    blurS += (Math.max(S.fx.mblur, autoBlur) - blurS) * Math.min(1, dt * 6);
+
+    updateCan(canA, S.A, t);
+    updateCan(canB, S.B, t);
+    updateSets(t);
+    updateLights(t);
+
+    // Fondo (yaw "desenrollado" para que la órbita de 360° no produzca saltos)
+    const yawRaw = Math.atan2(fwd.x, -fwd.z), pitch = Math.asin(clamp(fwd.y, -1, 1));
+    let dyaw = yawRaw - yawPrev;
+    dyaw -= TAU * Math.round(dyaw / TAU);
+    yawU += dyaw; yawPrev = yawRaw;
+    const yaw = yawU;
+    const bz = 1.14 + clamp((6 - S.cam.r) / 6, -0.3, 0.95) * 0.18;
+    const bu = bgMat.uniforms;
+    bu.uOff.value.set(yaw * 0.11, pitch * 0.12);
+    bu.uOff2.value.set(yaw * 0.2 + camPos.x * 0.012, pitch * 0.22 + camPos.y * 0.012);
+    bu.uRoll.value = S.cam.roll;
+    bu.uZoom.value = bz;
+    bu.uGain.value = look.gain;
+    bu.uHaze.value = look.haze;
+    bu.uHazeCol.value.copy(look.hazeCol);
+    bu.uFog.value = look.fogAmt;
+    bu.uDistort.value = S.fx.distort;
+    C.view.yaw = Math.sin(yaw) * 0.6; C.view.pitch = pitch * 0.5; C.view.roll = S.cam.roll; C.view.zoom = 1.02 + (bz - 1.14) * 0.6; C.view.trans = trans;
+
+    // Partículas, estelas, gotas, niebla
+    const proj = (vh() * dpr) / (2 * Math.tan((camera.fov * Math.PI) / 360));
+    PU.uProj.value = proj;
+    PU.uCam.value.copy(camPos);
+    PU.uFlow.value = S.p.flow;
+    PU.uRise.value = S.p.rise;
+    PU.uConverge.value = S.p.converge;
+    PU.uFocus.value = camPos.distanceTo(target);
+    PU.uAperture.value = S.fx.aperture;
+    PU.uColA.value.copy(look.pA); PU.uColB.value.copy(look.pB);
+    PU.uAlpha.value = look.pAlpha;
+    SU.uAlpha.value = S.sets.journey * clamp(Math.abs(flowSpeed) * 0.06, 0, 1);
+    SU.uStretch.value = clamp(Math.abs(flowSpeed) * 0.05, 0, 3.5);
+    SU.uColor.value.copy(look.pA).multiplyScalar(1.6);
+    streaks.visible = SU.uAlpha.value > 0.001;
+    DU.uShow.value = S.sets.drops;
+    floatDrops.visible = S.sets.drops > 0.001;
+    floatDrops.position.set(S.A.x, S.A.y, S.A.z);
+    FU.uColor.value.copy(look.hazeCol).lerp(look.fog, 0.3);
+    FU.uAmount.value = 0.07 + look.fogAmt * 0.9;
+
+    // Niebla, exposición, bloom y post
+    scene.fog.color.copy(look.fog);
+    scene.fog.density = look.fogD;
+    renderer.toneMappingExposure = look.exp * S.fx.exposure;
+    const flash = S.fx.flash * (C.reduced ? 0.55 : 1);
+    bloom.strength = look.bloom * (1 + flash * 1.4);
+    const fu = finalPass.uniforms;
+    fu.uTime.value = t;
+    fu.uFlash.value = flash;
+    fu.uBlur.value = blurS;
+    fu.uDof.value = S.fx.dof;
+    fu.uAberr.value = 0.3 + trans * 1.6;
+    fu.uDistort.value = (trans * 0.9 + S.fx.distort) * (C.reduced ? 0.4 : 1);
+
+    composer.render(dt);
+
+    // Rendimiento adaptativo: ajusta la resolución para sostener FPS
+    D.frames++;
+    perfFrames++;
+    const now = performance.now();
+    if (now - perfT > 1500) {
+      const fps = (perfFrames * 1000) / (now - perfT);
+      D.fps = Math.round(fps);
+      perfFrames = 0; perfT = now;
+      if (!document.hidden && C.loaded) {
+        if (fps < 45 && dpr > Q.dprMin + 0.01) { dpr = Math.max(Q.dprMin, dpr - 0.2); resize(); goodStreak = 0; }
+        else if (fps > 58) { if (++goodStreak >= 4 && dpr < Math.min(Q.dprMax, window.devicePixelRatio || 1) - 0.01) { dpr = Math.min(Q.dprMax, dpr + 0.15); resize(); goodStreak = 0; } }
+        else goodStreak = 0;
+        D.dpr = dpr;
+      }
+    }
+  }
+  let perfFrames = 0, perfT = performance.now(), goodStreak = 0;
+
+  /* =====================================================================
+     15. PRECOMPILACIÓN y arranque
+     ===================================================================== */
+  C.setProgress(0.93, 'Compilando shaders');
+  const toggles = [canA.group, canB.group, pinkS.mesh, pinkC.mesh, ice.mesh, greenS.mesh, greenR.mesh, stageI.mesh, stageB.mesh,
+    tRings.mesh, tShards.mesh, floor, coneA, coneB, streaks, floatDrops];
+  toggles.forEach((o) => { o.visible = true; });
+  scene.environment = getEnv(0);
+  try {
+    if (renderer.compileAsync && renderer.extensions.has('KHR_parallel_shader_compile')) await renderer.compileAsync(scene, camera);
+    else renderer.compile(scene, camera);
+  } catch (e) { renderer.compile(scene, camera); }
+  frame(0, 16);
+  if (C.mode !== 'pending') { running = false; renderer.dispose(); return; }
+  gsap.ticker.add(frame);
+  C.setProgress(0.99, 'Listo');
+  C.engineReady(hybrid);
+}
+</script>
+</body>
+</html>

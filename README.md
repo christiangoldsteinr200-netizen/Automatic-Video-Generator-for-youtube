@@ -33,6 +33,13 @@ python main.py "your-topic"
 
 This will generate a video about the specified topic and publish it to your YouTube account.
 
+## Cinematic 3D scroll experience
+
+[`cinematic-experience/`](cinematic-experience/) contains *Dos Mundos*, a single-file, scroll-driven
+3D film (Three.js + GSAP ScrollTrigger + WebGL) in 13 scenes built on the backgrounds in
+`cinematic-experience/visual_assets_neutral/`. Serve the folder (`python3 -m http.server`) and open
+`index.html`. See its [README](cinematic-experience/README.md) for details.
+
 ## Contributing
 
 Contributions are welcome! If you want to contribute to this project, please follow these steps:
